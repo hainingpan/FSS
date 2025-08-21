@@ -52,18 +52,18 @@ Synthetic parameters: $p_c=0.5$, $\nu=1.0$, $\beta=0.5$; $p\in[0.45,0.55]$ (11 p
 At a continuous transition, an observable $y$ near the critical point $p_c$ obeys the scaling form
 
 $$
-y(p, L) \sim L^{-\beta/\nu} \, f\!\left( (p - p_c) \, L^{1/\nu} \right),
+y(p,L) \sim L^{-\beta/\nu} f((p-p_c) L^{1/\nu})
 $$
 
 where:
 - $p$: tuning parameter; $L$: system size; $p_c$: critical point
 - $\nu$: correlation‑length exponent; $\beta$: scaling exponent of $y$
-- $f(\cdot)$: universal scaling function (unknown a priori)
+- $f(\cdot)$: unknown universal scaling function
 
 The collapse rescales
 
 $$
- x = (p - p_c) \, L^{1/\nu}, \qquad y_{\text{scaled}} = y \, L^{\beta/\nu},
+x = (p-p_c) L^{1/\nu}, \quad y_{\text{scaled}} = y L^{\beta/\nu}
 $$
 
 and optimizes $p_c, \nu, \beta$ so that $y_{\text{scaled}}$ falls on a single curve $f(x)$.
@@ -71,7 +71,7 @@ and optimizes $p_c, \nu, \beta$ so that $y_{\text{scaled}}$ falls on a single cu
 More generally, for dynamical scaling $f(t / L^z)$: treat time $t$ as $p$, set $p_c=0$, and identify $z = -1/\nu$. Then
 
 $$
- (p - p_c) \, L^{1/\nu} \;\mapsto\; t \, L^{-z},
+(p-p_c) L^{1/\nu} \mapsto t L^{-z}
 $$
 
 so the mapping is direct.
