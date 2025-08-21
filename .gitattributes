@@ -1,0 +1,5 @@
+# Treat Jupyter notebooks as vendored so they don't dominate language stats
+*.ipynb linguist-vendored
+
+# (Optional) You can force-detect certain extensions if needed, e.g.:
+# *.py linguist-language=Python
