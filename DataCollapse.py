@@ -208,7 +208,7 @@ class DataCollapse:
 
 
 
-    def plot_data_collapse(self,ax=None,drift=False,driftcollapse=False,plot_irrelevant=True,errorbar=False,abs=False,**kwargs):
+    def plot_data_collapse(self,ax=None,drift=False,driftcollapse=False,plot_irrelevant=True,errorbar=False,abs=False,color_iter=None,**kwargs):
         import matplotlib.pyplot as plt
         x_i=(self.p_i-self.p_c)*(self.L_i)**(1/self.nu)
         y_i= self.y_i*self.L_i**(self.beta/self.nu)
@@ -220,11 +220,12 @@ class DataCollapse:
         idx_list=[0]+(np.cumsum([self.df.xs(key=L,level=self.L_).shape[0] for L in L_list])).tolist()
         L_dict={L:(start_idx,end_idx) for L,start_idx,end_idx in zip(L_list,idx_list[:-1],idx_list[1:])}
         # color_iter=iter(plt.cm.rainbow(np.linspace(0,1,len(L_list))))
-        color_iter = iter(plt.cm.Blues(0.4+0.6*(i/L_list.shape[0])) for i in range(L_list.shape[0]))
+        if color_iter is None:
+            color_iter = iter(plt.cm.Blues(0.4+0.6*(i/L_list.shape[0])) for i in range(L_list.shape[0]))
         color_r_iter = iter(plt.cm.Reds(0.4+0.6*(i/L_list.shape[0])) for i in range(L_list.shape[0]))
         if drift and driftcollapse and plot_irrelevant:
             ax2=ax.twinx()
-            ax2.set_ylabel(r'$y_{irre}$')
+            ax2.set_ylabel(r'$y_{irre}$')  # TODO: needs to adapt finite beta
         for L,(start_idx,end_idx) in L_dict.items():
             color=next(color_iter)
             if drift:
@@ -258,7 +259,7 @@ class DataCollapse:
 
                 
 
-        ax.set_ylabel(r'$y_i$')
+        ax.set_ylabel(r'$y_i L^{\beta/\nu}$')
         if drift:
             if not driftcollapse:
                 ax.set_xlabel(f'${{{self.p_}}}_i$')
@@ -275,7 +276,7 @@ class DataCollapse:
                 except:
                     ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f},$\nu$={self.nu:.3f},$y$= {self.y:.3f}')
 
-                ax.set_ylabel(r'$y_i-y_{irre}$')
+                ax.set_ylabel(r'$y_i-y_{irre}$') # TODO: needs to adapt finite beta
         else:
             if abs:
                 ax.set_xlabel(f'$|{{{self.p_}}}_i-{{{self.p_}}}_c|{{{self.L_}}}^{{1/\\nu}}$')
@@ -395,7 +396,6 @@ def plot_extrapolate_fitting(dc,ax=None):
     ax.set_xlabel('Threshold of SV')
     ax.set_ylabel(r'$\nu$',color='k')
     ax2.set_ylabel(r'$p_c$',color='b')
-    
 class optimal_df:
     def __init__(self,names=['Metrics', 'p_proj', 'p_ctrl']):
         import pandas as pd
