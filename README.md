@@ -19,7 +19,7 @@ The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matpl
 ## Quick start
 ```python
 import numpy as np, pandas as pd
-from FSS import DataCollapse
+from fss import DataCollapse
 
 # Build toy data
 rng = np.random.default_rng(0)
