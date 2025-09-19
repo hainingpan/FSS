@@ -6,10 +6,10 @@ Minimal, lmfit‑backed wrapper for estimating critical parameters via finite‑
 ```bash
 git clone https://github.com/Pixley-Research-Group-in-CMT/FSS.git
 cd FSS
-pip install -r requirements.txt
+pip install .            # or: pip install -e . for editable installs
 ```
 
-Dependencies: numpy, pandas, matplotlib, lmfit, tqdm (see `requirements.txt`).
+The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matplotlib, lmfit, tqdm).
 
 ## Data format
 - pandas DataFrame with MultiIndex levels [p, L].
@@ -19,7 +19,7 @@ Dependencies: numpy, pandas, matplotlib, lmfit, tqdm (see `requirements.txt`).
 ## Quick start
 ```python
 import numpy as np, pandas as pd
-from DataCollapse import DataCollapse
+from FSS import DataCollapse
 
 # Build toy data
 rng = np.random.default_rng(0)
@@ -96,7 +96,7 @@ Provided “AS IS” without warranties; see full text in `LICENSE`.
 
 ## TODO
 - [ ] Better documentation (full API, examples)
-- [ ] Package-ify (standard Python package with pyproject.toml, versioning, wheels, etc.)
+- [x] Package-ify (standard Python package with pyproject.toml, versioning, wheels, etc.)
 - [ ] Bootstrap method to estimate error bars (expose, document, examples)
 
 ## Contact

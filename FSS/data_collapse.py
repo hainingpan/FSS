@@ -1,4 +1,16 @@
+"""Core finite-size scaling routines for data collapse analysis."""
+
 import numpy as np
+
+__all__ = [
+    "DataCollapse",
+    "grid_search",
+    "plot_chi2_ratio",
+    "extrapolate_fitting",
+    "plot_extrapolate_fitting",
+    "optimal_df",
+    "bootstrapping",
+]
 
 class DataCollapse:
     """DataCollapse class, use lmfit"""
