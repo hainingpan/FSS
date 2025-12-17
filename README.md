@@ -64,7 +64,7 @@ Synthetic parameters: $p_c=0.5$, $\nu=1.0$, $\beta=0.5$; $p\in[0.45,0.55]$ (11 p
 | <img src="figures/before_collapse.png" alt="Raw data" width="320"/> | <img src="figures/after_collapse.png" alt="Data collapse" width="320"/> |
 
 ## Theory (finite‑size scaling)
-At a continuous transition, an observable $y$ near the critical point $p_c$ obeys the scaling form
+For a continuous phase transition, an observable $y$ near the critical point $p_c$ obeys the scaling form
 
 $$
 y(p,L) \sim L^{-\beta/\nu} f((p-p_c) L^{1/\nu})
@@ -91,15 +91,110 @@ $$
 
 so the mapping is direct.
 
-## API (essentials)
-- DataCollapse(df, p_, L_, params=None, p_range=[-0.1, 0.1], Lmin=None, Lmax=None, adaptive_func=None)
-- datacollapse(p_c=None, nu=None, beta=None, p_c_vary=True, nu_vary=True, beta_vary=False, ...)
-- plot_data_collapse(...)
-- datacollapse_with_drift_GLS(n1, n2, p_c=None, nu=None, y=None, ...)
+## Scaling corrections
+
+Near criticality, finite-size corrections modify the scaling form:
+
+$$
+y(p, L) = \sum_{j_1=0}^{n_1} \sum_{j_2=0}^{n_2} a_{j_1 j_2} \cdot x^{j_1} \cdot L^{-y \cdot j_2}
+$$
+
+where:
+- $x = (p - p_c) L^{1/\nu}$: relevant scaling variable
+- $L^{-y}$: leading irrelevant correction (vanishes as $L \to \infty$)
+- $y$: correction-to-scaling exponent
+- $n_1$: polynomial order for the scaling function $f(x)$
+- $n_2$: polynomial order for corrections ($n_2 = 0$ recovers standard scaling)
+- $a_{j_1 j_2}$: Taylor coefficients (fitted via GLS)
+
+The observable decomposes into:
+- **Relevant part** (universal scaling function): $f(x) = \sum_{j_1=0}^{n_1} a_{j_1, 0} \, x^{j_1}$
+- **Irrelevant part** (corrections): $\sum_{j_1, j_2 > 0} a_{j_1 j_2} \, x^{j_1} L^{-y j_2}$
+
+Nonlinear parameters $(p_c, \nu, y)$ are optimized via `lmfit`; linear coefficients $a_{j_1 j_2}$ are solved analytically by Generalized Least Squares.
+
+### Model selection
+
+Use `grid_search` to scan over $(n_1, n_2)$ and `plot_chi2_ratio` to visualize:
+- **Reduced chi-squared** $\chi^2_\nu$: should be $\approx 1$ (shaded cyan band shows $[0.5, 5]$)
+- **Irrelevant contribution ratio**: fraction of variance explained by corrections; should be small ($< 10\%$, shaded orange)
+
+Choose the smallest $(n_1, n_2)$ where $\chi^2_\nu \approx 1$ and irrelevant contribution is modest.
+
+### Usage
+
+```python
+import numpy as np, pandas as pd
+from fss import DataCollapse, grid_search, plot_chi2_ratio
+
+# Generate dummy data with known parameters
+# O = a00 + a10*x + (a01 + a11*x)*L^{-y}
+# where x = (p - p_c) * L^{1/nu}
+p_c_true, nu_true, y_true = 0.5, 1.3, 1.0
+a_true = np.array([[1.0, 0.5],    # a00, a01
+                   [0.3, 0.2]])   # a10, a11 (n1=1, linear)
+
+rng = np.random.default_rng(0)
+p_list = np.round(np.linspace(0.45, 0.55, 11), 2)
+L_list = np.array([8, 16, 32, 64])  # wide range so L^{-y} varies 8x
+
+data = {}
+for L in L_list:
+    for p in p_list:
+        x = (p - p_c_true) * L ** (1 / nu_true)
+        ir = L ** (-y_true)
+        y_mean = sum(a_true[j1, j2] * x**j1 * ir**j2
+                     for j1 in range(2) for j2 in range(2))
+        data[(p, L)] = rng.normal(y_mean, 0.01, 100)
+
+index = pd.MultiIndex.from_tuples(list(data.keys()), names=['p', 'L'])
+df = pd.DataFrame({'observations': list(data.values())}, index=index)
+
+# When n1, n2 are unknown, use grid search to find optimal model
+model_dict = grid_search(
+    n1_list=range(0, 4), n2_list=range(0, 3),
+    p_c=0.5, nu=1.0, y=1.0,
+    p_c_range=(0.45, 0.55), nu_range=(0.5, 2.0),
+    df=df, p_='p', L_='L', params={}, p_range=[0.45, 0.55]
+)
+
+# Visualize to select optimal (n1, n2)
+plot_chi2_ratio(model_dict)
+
+# Select optimal model: smallest (n1, n2) with chi^2 ≈ 1
+# Look for where solid lines enter the cyan band (chi^2 in [0.5, 5])
+# and dashed lines are in orange band (irrelevant ratio < 10%)
+optimal = min(
+    ((n1, n2) for (n1, n2), dc in model_dict.items()
+     if hasattr(dc, 'res') and 0.5 < dc.res.redchi < 5),
+    key=lambda x: (x[1], x[0])  # prefer smaller n2, then smaller n1
+)
+print(f"Optimal model: n1={optimal[0]}, n2={optimal[1]}")
+
+# Fit with optimal (n1, n2)
+dc = model_dict[optimal]
+print(dc.res.params)  # should recover p_c≈0.5, nu≈1.3, y≈1.0
+dc.plot_data_collapse(drift=True, driftcollapse=True)
+```
+
+## API
+
+- `DataCollapse(df, p_, L_, params=None, p_range=[-0.1, 0.1], Lmin=None, Lmax=None, adaptive_func=None, estimator='mean')`
+- `datacollapse(p_c=None, nu=None, beta=None, p_c_vary=True, nu_vary=True, beta_vary=False, ...)`
+- `datacollapse_with_drift_GLS(n1, n2, p_c=None, nu=None, y=None, beta=0, ..._range, ..._vary)`
+  - `n1`, `n2`: polynomial orders for scaling function and corrections
+  - `beta`: order parameter exponent (default 0, set `beta_vary=True` to fit)
+  - Returns `lmfit.MinimizerResult`; sets `self.y_i_minus_irrelevant`, `self.y_i_irrelevant`, `self.coeffs`
+- `plot_data_collapse(...)`
+- `grid_search(n1_list, n2_list, p_c, nu, y, p_c_range, nu_range, **kwargs)`
+  - Scans polynomial orders; pass `DataCollapse` init kwargs (`df`, `p_`, `L_`, `params`, `p_range`, `Lmin`, `Lmax`)
+  - Returns `dict[(n1, n2)] → DataCollapse`
+- `plot_chi2_ratio(model_dict, L1=False)`
+  - Plots $\chi^2_\nu$ (solid) and irrelevant ratio (dashed) vs $n_1$ for each $n_2$
 
 Optimization is powered by lmfit; extra keyword arguments are passed through to `lmfit.minimize`.
 
-Other helper utilities exist (e.g., grid_search, plot_chi2_ratio, extrapolate_fitting, plot_extrapolate_fitting, optimal_df, bootstrapping) and will be documented.
+Other utilities: `extrapolate_fitting`, `plot_extrapolate_fitting`, `optimal_df`, `bootstrapping`.
 
 ## License
 BSD 3‑Clause License. You may use, modify, and redistribute the code (source or binary) provided you:

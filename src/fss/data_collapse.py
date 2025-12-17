@@ -189,44 +189,53 @@ class DataCollapse:
         self.y_i_minus_irrelevant=self.y_i-np.einsum('ij,ik,kj->j',self.phi_1_,self.a[:,1:],self.phi_2_[1:,:])
         return res
     
-    def loss_with_drift_GLS(self,p_c,nu,y,n1,n2):
+    def loss_with_drift_GLS(self,p_c,nu,y,n1,n2,beta=0):
         x_i=(self.p_i-p_c)*(self.L_i)**(1/nu)
         ir_i=self.L_i**(-y) # irrelevant scaling
         j1,j2=np.meshgrid(np.arange(n1+1),np.arange(n2+1),indexing='ij')
         self.X=(x_i**j1.flatten()[:,np.newaxis] * ir_i**j2.flatten()[:,np.newaxis]).T
-        Y=self.y_i
-        Sigma_inv=np.diag(1/self.d_i**2)
+        # Scale observable by L^{beta/nu} to get the universal scaling function
+        Y=self.y_i * self.L_i**(beta/nu)
+        d_scaled=self.d_i * self.L_i**(beta/nu)
+        Sigma_inv=np.diag(1/d_scaled**2)
         XX=self.X.T@ Sigma_inv @ self.X
         XY=self.X.T@ Sigma_inv @ Y
-        self.beta=np.linalg.inv(XX)@XY
-        self.y_i_fitted=self.X @ self.beta
-        return (self.y_i-self.y_i_fitted)/self.d_i
+        self.coeffs=np.linalg.inv(XX)@XY
+        self.y_i_scaled=Y  # scaled observable
+        self.d_i_scaled=d_scaled
+        self.y_i_fitted=self.X @ self.coeffs
+        return (self.y_i_scaled-self.y_i_fitted)/self.d_i_scaled
 
     
-    def datacollapse_with_drift_GLS(self,n1,n2,p_c=None,nu=None,y=None,p_c_range=(0,1),nu_range=(0,2),p_c_vary=True,nu_vary=True,**kwargs):
-        """fit the coefficient of the taylor expansion of the scaling function, using generalized least square"""
+    def datacollapse_with_drift_GLS(self,n1,n2,p_c=None,nu=None,y=None,beta=0,p_c_range=(0,1),nu_range=(0,2),y_range=(0,5),beta_range=(0,2),p_c_vary=True,nu_vary=True,y_vary=True,beta_vary=False,**kwargs):
+        """fit the coefficient of the taylor expansion of the scaling function, using generalized least square
+
+        The scaling form is: y(p,L) = L^{-beta/nu} * sum_{j1,j2} a_{j1,j2} * x^{j1} * L^{-y*j2}
+        where x = (p - p_c) * L^{1/nu}
+        """
         from lmfit import minimize, Parameters
 
         params=Parameters()
         params.add('p_c',value=p_c,min=p_c_range[0],max=p_c_range[1],vary=p_c_vary)
         params.add('nu',value=nu,min=nu_range[0],max=nu_range[1],vary=nu_vary)
-        params.add('y',value=y,min=0)
+        params.add('y',value=y,min=y_range[0],max=y_range[1],vary=y_vary)
+        params.add('beta',value=beta,min=beta_range[0],max=beta_range[1],vary=beta_vary)
 
         def residual(params):
-            return self.loss_with_drift_GLS(params['p_c'],params['nu'],params['y'],n1,n2)
+            return self.loss_with_drift_GLS(params['p_c'],params['nu'],params['y'],n1,n2,params['beta'])
         res=minimize(residual,params,**kwargs)
         self.p_c=res.params['p_c'].value
         self.nu=res.params['nu'].value
         self.y=res.params['y'].value
+        self.beta=res.params['beta'].value
         self.res=res
-        self.x_i=(self.p_i-self.p_c)*(self.L_i)**(1/nu)
+        self.x_i=(self.p_i-self.p_c)*(self.L_i)**(1/self.nu)
         if n2>0:
-            self.y_i_minus_irrelevant=self.y_i- self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.beta.reshape((n1+1,n2+1))[:,1:].flatten()
-            self.y_i_irrelevant=self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.beta.reshape((n1+1,n2+1))[:,1:].flatten()
+            self.y_i_minus_irrelevant=self.y_i_scaled - self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.coeffs.reshape((n1+1,n2+1))[:,1:].flatten()
+            self.y_i_irrelevant=self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.coeffs.reshape((n1+1,n2+1))[:,1:].flatten()
         else:
-            self.y_i_minus_irrelevant=self.y_i
+            self.y_i_minus_irrelevant=self.y_i_scaled
             self.y_i_irrelevant=0
-        self.res=res
         return res
         
 
