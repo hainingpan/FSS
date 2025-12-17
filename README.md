@@ -91,7 +91,7 @@ $$
 
 so the mapping is direct.
 
-## Scaling corrections
+## Scaling corrections for drifting crossings
 
 Near criticality, finite-size corrections modify the scaling form:
 
@@ -176,6 +176,13 @@ dc = model_dict[optimal]
 print(dc.res.params)  # should recover p_c≈0.5, nu≈1.3, y≈1.0
 dc.plot_data_collapse(drift=True, driftcollapse=True)
 ```
+
+### Example figures
+Synthetic parameters: $p_c=0.5$, $\nu=1.3$, $y=1.0$; $p\in[0.45,0.55]$ (11 points); $L\in\{8,16,32,64\}$; polynomial with $(n_1,n_2)=(1,1)$; noise $\epsilon=0.01$; $N=100$ samples. Recovered fit: $p_c,\nu,y$ close to truth.
+
+| Raw data (drifting crossings) | Data collapse (irrelevant removed) |
+|:-----------------------------:|:----------------------------------:|
+| <img src="figures/before_collapse_drifting.png" alt="Raw drifting data" width="320"/> | <img src="figures/after_collapse_drifting.png" alt="Drifting data collapse" width="320"/> |
 
 ## API
 

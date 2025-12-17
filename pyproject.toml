@@ -17,11 +17,14 @@ license = { file = "LICENSE" }
 
 dependencies = [
   "numpy>2",
-  "lmfit",
-  "matplotlib",
+  "lmfit>1",
+  "matplotlib>3",
   "pandas>2",
   "tqdm",
 ]
+
+[dependency-groups]
+dev = ["pytest>=8"]
 
 [project.urls]
 Homepage = "https://github.com/Pixley-Research-Group-in-CMT/FSS.git"
