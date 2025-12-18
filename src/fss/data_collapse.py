@@ -1,6 +1,15 @@
 """Core finite-size scaling routines for data collapse analysis."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Callable, Iterator, Any
+
 import numpy as np
+
+if TYPE_CHECKING:
+    import pandas as pd
+    from matplotlib.axes import Axes
+    from lmfit.minimizer import MinimizerResult
 
 __all__ = [
     "DataCollapse",
@@ -13,32 +22,49 @@ __all__ = [
 ]
 
 class DataCollapse:
-    """DataCollapse class, use lmfit"""
-    def __init__(self,df,p_,L_,params={'Metrics':'O',},p_range=[-0.1,0.1],Lmin=None,Lmax=None,adaptive_func=None, estimator = 'mean'):
-        """ Perform Finite size scaling following the scaling form y~L^{-beta/nu} f[(p-p_c)L^{1/nu}], where `f` is a universal scaling function, and `y` is the observable.
+    """Finite-size scaling data collapse analysis using lmfit optimization."""
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        p_: str,
+        L_: str,
+        params: dict[str, Any] | None = None,
+        p_range: list[float] = [-0.1, 0.1],
+        Lmin: int | None = None,
+        Lmax: int | None = None,
+        adaptive_func: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None,
+        estimator: str = 'mean',
+    ) -> None:
+        """Perform finite-size scaling following y ~ L^{-beta/nu} f[(p-p_c)L^{1/nu}].
 
         Parameters
         ----------
-        df : DataFrame
-            The DataFrame containing the data containing multiindex with at least `p_` and `L_` as the level names
-        p_ : String
-            Tuning parameter name, such as measurement rate `p`, temperature `T`, magnetic field `B`, etc.
-        L_ : String
-            System size name, such as system size `L`, time `t`, etc.
-        params : dict, optional
-            Other parameters to fix, by default {'Metrics':'O',}
-        p_range : list, optional
-            Range of tuning parameter, by default [-0.1,0.1]
-        Lmin : Int, optional
-            Minimal length L, by default None
-        Lmax : Int, optional
-            Minimal length L, by default None
-        adaptive_func : function, optional
-            Arbitary way to select data, by default None
+        df : pd.DataFrame
+            DataFrame with MultiIndex containing at least `p_` and `L_` as level names.
+            Must have an 'observations' column (for 'mean'/'std' estimator) or
+            'estimator' and 'standard_error' columns (for 'manual' estimator).
+        p_ : str
+            Name of the tuning parameter index level (e.g., 'p', 'T', 'B').
+        L_ : str
+            Name of the system size index level (e.g., 'L', 't').
+        params : dict[str, Any] | None, optional
+            Fixed parameter values to select from the DataFrame via `xs()`.
+            Example: `{'Metrics': 'O'}` to select rows where Metrics='O'.
+        p_range : list[float], optional
+            Range [min, max] of tuning parameter to include, by default [-0.1, 0.1].
+        Lmin : int | None, optional
+            Minimum system size to include. If None, no lower bound.
+        Lmax : int | None, optional
+            Maximum system size to include. If None, no upper bound.
+        adaptive_func : Callable[[ndarray, ndarray], ndarray] | None, optional
+            Custom function `f(p_values, L_values) -> values` for data selection.
+            When provided, `p_range` filters on `f(p, L)` instead of `p` directly.
         estimator : str, optional
-            'mean': fit the mean value of the observable, 
-            'std': fit the std value of the observable, 
-            'manual': manually provide the estimator and standard error of the data, with dataframe columns being 'estimator' and 'standard_error', 
+            Method for computing the estimator and standard error:
+            - 'mean': Use mean of observations; standard error = std / sqrt(n).
+            - 'std': Use std of observations; standard error = 1.
+            - 'manual': Use 'estimator' and 'standard_error' columns directly.
         """
         self.p_range=p_range
         self.Lmin=0 if Lmin is None else Lmin
@@ -51,7 +77,28 @@ class DataCollapse:
         self.df=self.load_dataframe(df,params)
         self.L_i,self.p_i,self.d_i,self.y_i = self.load_data()
     
-    def load_dataframe(self,df,params,):
+    def load_dataframe(
+        self,
+        df: pd.DataFrame,
+        params: dict[str, Any] | None,
+    ) -> pd.DataFrame:
+        """Filter and prepare the input DataFrame for analysis.
+
+        Applies parameter selection via `xs()`, filters by system size bounds
+        (Lmin, Lmax), and filters by tuning parameter range (p_range).
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Input DataFrame with MultiIndex.
+        params : dict[str, Any] | None
+            Parameter values to select via `df.xs()`.
+
+        Returns
+        -------
+        pd.DataFrame
+            Filtered and sorted DataFrame.
+        """
         if params is None or len(params)==0:
             df=df
         else:
@@ -64,7 +111,28 @@ class DataCollapse:
             df=df[(val <=self.p_range[1]) & (self.p_range[0]<=val)]
         return df.sort_index(level=[self.L_,self.p_])
 
-    def load_data(self):
+    def load_data(self) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Extract arrays from the filtered DataFrame.
+
+        Computes the estimator (y_i) and standard error (d_i) based on the
+        `estimator` setting ('mean', 'std', or 'manual').
+
+        Returns
+        -------
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+            (L_i, p_i, d_i, y_i) where:
+            - L_i: System sizes
+            - p_i: Tuning parameter values
+            - d_i: Standard errors
+            - y_i: Estimator values (observable)
+
+        Raises
+        ------
+        NotImplementedError
+            If `estimator` is not one of 'mean', 'std', 'manual'.
+        AssertionError
+            If fewer than 4 unique tuning parameter values are present.
+        """
         L_i=(self.df.index.get_level_values(self.L_).values)
         p_i=(self.df.index.get_level_values(self.p_).values)
         if self.estimator=='mean':
@@ -83,8 +151,26 @@ class DataCollapse:
         return L_i,p_i,d_i,y_i   
 
     
-    def loss(self,p_c,nu,beta=0):
-        """ y~L^{-beta/nu} f((p-p_c)L^{1/nu})"""
+    def loss(self, p_c: float, nu: float, beta: float = 0) -> np.ndarray:
+        """Compute smoothness-based residuals for data collapse.
+
+        Evaluates how well data collapses onto a universal curve using linear
+        interpolation. The scaling form is y ~ L^{-beta/nu} f((p-p_c)L^{1/nu}).
+
+        Parameters
+        ----------
+        p_c : float
+            Critical point of the tuning parameter.
+        nu : float
+            Correlation length exponent.
+        beta : float, optional
+            Order parameter exponent, by default 0.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized residuals measuring deviation from smooth collapse.
+        """
         x_i=(self.p_i-p_c)*(self.L_i)**(1/nu)
         order=x_i.argsort()
         x_i_ordered=x_i[order]
@@ -101,17 +187,54 @@ class DataCollapse:
         # return y[0],y_bar,y_var
         return (y[0]-y_bar)/np.sqrt(y_var)
 
-    def loss_with_drift(self,p_c,nu,y,b1,b2,a):
-        """p_c: critical point
-        nu: relevent critical exponent
-        y: irrelevant scaling function
-        b1: b1=[b10=0,b11,b12,...] in relevent part , b1.shape=(m1,)
-        b2: b2=[b20,b21,b22,...] in irrelevant part, b2.shape=(m2+1,)
-        a: a=[[a00, a01=1, a02, a03, ...],
-            [a10=1, a11, a12, a13, ...],
-            [a20, a21,   a22, a23, ...],
-            ...]
-        w_i.shape=(n_sample,)
+    def loss_with_drift(
+        self,
+        p_c: float,
+        nu: float,
+        y: float,
+        b1: list[float] | np.ndarray,
+        b2: list[float] | np.ndarray,
+        a: np.ndarray,
+    ) -> np.ndarray:
+        """Compute residuals with irrelevant scaling corrections (Taylor expansion).
+
+        Uses a polynomial expansion for both relevant and irrelevant scaling
+        variables. The scaling form includes corrections to scaling.
+
+        Convention from  Sec. 2.5 from 10.1088/1367-2630/16/1/015012
+
+        Parameters
+        ----------
+        p_c : float
+            Critical point of the tuning parameter.
+        nu : float
+            Relevant critical exponent (correlation length exponent).
+        y : float
+            Irrelevant scaling exponent.
+        b1 : list[float] | np.ndarray
+            Coefficients for relevant scaling variable, shape (m1+1,).
+            b1 = [b10=0, b11, b12, ...] where b10=0 is enforced to ensure u1(w=0)=0.
+            Computes: u1 = sum_i b1[i] * w^i, where w = p - p_c.
+        b2 : list[float] | np.ndarray
+            Coefficients for irrelevant scaling variable, shape (m2+1,).
+            b2 = [b20, b21, b22, ...].
+            Computes: u2 = sum_i b2[i] * w^i.
+        a : np.ndarray
+            Coefficient matrix (n1+1, n2+1) for the Taylor expansion::
+
+                a = [[a00,   a01=1, a02, a03, ...],
+                     [a10=1, a11,   a12, a13, ...],
+                     [a20,   a21,   a22, a23, ...],
+                     ...]
+
+            Note: a[0,1] = 1 and a[1,0] = 1 are fixed normalization constraints.
+            Computes: f = sum_{i,j} a[i,j] * phi_1^i * phi_2^j,
+            where phi_1 = u1 * L^{1/nu} and phi_2 = u2 * L^{-y}.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized residuals (y_i - y_fitted) / d_i.
         """
         w_i=((self.p_i-p_c))
         # w_i=((self.p_i-p_c)/p_c)
@@ -123,12 +246,57 @@ class DataCollapse:
         self.phi_2_=phi_2 ** np.arange(a.shape[1])[:,np.newaxis]    # (n2+1,n_sample)
         self.a=a
         self.y_i_fitted=np.einsum('ij,ik,kj->j',self.phi_1_,self.a,self.phi_2_)
-        
+
         return (self.y_i-self.y_i_fitted)/self.d_i
     
-    def datacollapse(self,p_c=None,nu=None,beta=None,p_c_vary=True,nu_vary=True,beta_vary=False,nu_range=(.5,2),p_c_range=(0,1),beta_range=(0,1),**kwargs):
-        """data collapse without drift, x_i=(p_i-p_c)L^{1/nu}, and try to make x_i vs y_i collapse to a smooth line
-        when beta exist, y_i is scaled by L^{beta/nu}"""
+    def datacollapse(
+        self,
+        p_c: float | None = None,
+        nu: float | None = None,
+        beta: float | None = None,
+        p_c_vary: bool = True,
+        nu_vary: bool = True,
+        beta_vary: bool = False,
+        nu_range: tuple[float, float] = (0.5, 2),
+        p_c_range: tuple[float, float] = (0, 1),
+        beta_range: tuple[float, float] = (0, 1),
+        **kwargs,
+    ) -> MinimizerResult:
+        """Perform data collapse optimization without irrelevant corrections.
+
+        Fits critical exponents (p_c, nu, beta) by minimizing deviations from
+        a smooth universal scaling curve. The scaling form is:
+        y * L^{beta/nu} = f((p - p_c) * L^{1/nu})
+
+        Parameters
+        ----------
+        p_c : float | None, optional
+            Initial guess for critical point.
+        nu : float | None, optional
+            Initial guess for correlation length exponent.
+        beta : float | None, optional
+            Initial guess for order parameter exponent.
+        p_c_vary : bool, optional
+            Whether to fit p_c, by default True.
+        nu_vary : bool, optional
+            Whether to fit nu, by default True.
+        beta_vary : bool, optional
+            Whether to fit beta, by default False.
+        nu_range : tuple[float, float], optional
+            Bounds (min, max) for nu, by default (0.5, 2).
+        p_c_range : tuple[float, float], optional
+            Bounds (min, max) for p_c, by default (0, 1).
+        beta_range : tuple[float, float], optional
+            Bounds (min, max) for beta, by default (0, 1).
+        **kwargs
+            Additional arguments passed to `lmfit.minimize()`.
+
+        Returns
+        -------
+        MinimizerResult
+            The lmfit optimization result. Fitted values are also stored as
+            `self.p_c`, `self.nu`, `self.beta`, and `self.res`.
+        """
         from lmfit import minimize, Parameters
 
         params=Parameters()
@@ -146,7 +314,70 @@ class DataCollapse:
         self.res=res
         return res
 
-    def datacollapse_with_drift(self,m1,m2,n1,n2,p_c=None,nu=None,y=None,b1=None,b2=None,a=None,p_c_vary=True,nu_vary=True,p_c_range=(0,1),y_vary=True,seed=None,**kwargs):
+    def datacollapse_with_drift(
+        self,
+        m1: int,
+        m2: int,
+        n1: int,
+        n2: int,
+        p_c: float | None = None,
+        nu: float | None = None,
+        y: float | None = None,
+        b1: list[float] | np.ndarray | None = None,
+        b2: list[float] | np.ndarray | None = None,
+        a: np.ndarray | None = None,
+        p_c_vary: bool = True,
+        nu_vary: bool = True,
+        p_c_range: tuple[float, float] = (0, 1),
+        y_vary: bool = True,
+        seed: int | None = None,
+        **kwargs,
+    ) -> MinimizerResult:
+        """Perform data collapse with irrelevant scaling corrections (Taylor expansion).
+
+        Fits critical exponents and polynomial coefficients using the full
+        Taylor expansion approach. All coefficients (b1, b2, a) are fitted.
+
+        Parameters
+        ----------
+        m1 : int
+            Polynomial order for relevant scaling variable coefficients b1.
+        m2 : int
+            Polynomial order for irrelevant scaling variable coefficients b2.
+        n1 : int
+            Maximum power of phi_1 in the scaling function expansion.
+        n2 : int
+            Maximum power of phi_2 in the scaling function expansion.
+        p_c : float | None, optional
+            Initial guess for critical point.
+        nu : float | None, optional
+            Initial guess for correlation length exponent.
+        y : float | None, optional
+            Initial guess for irrelevant scaling exponent.
+        b1 : list[float] | np.ndarray | None, optional
+            Initial coefficients for relevant scaling. If None, random init.
+        b2 : list[float] | np.ndarray | None, optional
+            Initial coefficients for irrelevant scaling. If None, random init.
+        a : np.ndarray | None, optional
+            Initial coefficient matrix. If None, random init.
+        p_c_vary : bool, optional
+            Whether to fit p_c, by default True.
+        nu_vary : bool, optional
+            Whether to fit nu, by default True.
+        p_c_range : tuple[float, float], optional
+            Bounds (min, max) for p_c, by default (0, 1).
+        y_vary : bool, optional
+            Whether to fit y, by default True.
+        seed : int | None, optional
+            Random seed for initial coefficient values.
+        **kwargs
+            Additional arguments passed to `lmfit.minimize()`.
+
+        Returns
+        -------
+        MinimizerResult
+            The lmfit optimization result. Fitted values stored as attributes.
+        """
         from lmfit import minimize, Parameters
 
         params=Parameters()
@@ -185,11 +416,57 @@ class DataCollapse:
         self.res=res
 
         self.x_i=(self.p_i-self.p_c)*(self.L_i)**(1/nu)
-        
+
         self.y_i_minus_irrelevant=self.y_i-np.einsum('ij,ik,kj->j',self.phi_1_,self.a[:,1:],self.phi_2_[1:,:])
         return res
     
-    def loss_with_drift_GLS(self,p_c,nu,y,n1,n2,beta=0):
+    def loss_with_drift_GLS(
+        self,
+        p_c: float,
+        nu: float,
+        y: float,
+        n1: int,
+        n2: int,
+        beta: float = 0,
+    ) -> np.ndarray:
+        """Compute residuals using generalized least squares (GLS).
+
+        Fits the scaling form with finite-size corrections:
+
+            y(p, L) * L^{beta/nu} = sum_{j1=0}^{n1} sum_{j2=0}^{n2} a_{j1,j2} * x^{j1} * L^{-y*j2}
+
+        where:
+            - x = (p - p_c) * L^{1/nu} : relevant scaling variable
+            - L^{-y} : irrelevant scaling variable (vanishes as L -> inf)
+            - a_{j1,j2} : polynomial coefficients (solved via GLS)
+
+        The observable decomposes into:
+            - Relevant part (universal): f(x) = sum_{j1} a_{j1,0} * x^{j1}
+            - Irrelevant part (corrections): sum_{j1,j2>0} a_{j1,j2} * x^{j1} * L^{-y*j2}
+
+        Nonlinear parameters (p_c, nu, y) are optimized via lmfit; linear
+        coefficients a_{j1,j2} are solved analytically by GLS.
+
+        Parameters
+        ----------
+        p_c : float
+            Critical point of the tuning parameter.
+        nu : float
+            Correlation length exponent.
+        y : float
+            Irrelevant scaling exponent.
+        n1 : int
+            Maximum power of the relevant scaling variable x.
+        n2 : int
+            Maximum power of the irrelevant scaling variable L^{-y}.
+        beta : float, optional
+            Order parameter exponent, by default 0.
+
+        Returns
+        -------
+        np.ndarray
+            Normalized residuals (y_scaled - y_fitted) / d_scaled.
+        """
         x_i=(self.p_i-p_c)*(self.L_i)**(1/nu)
         ir_i=self.L_i**(-y) # irrelevant scaling
         j1,j2=np.meshgrid(np.arange(n1+1),np.arange(n2+1),indexing='ij')
@@ -207,11 +484,73 @@ class DataCollapse:
         return (self.y_i_scaled-self.y_i_fitted)/self.d_i_scaled
 
     
-    def datacollapse_with_drift_GLS(self,n1,n2,p_c=None,nu=None,y=None,beta=0,p_c_range=(0,1),nu_range=(0,2),y_range=(0,5),beta_range=(0,2),p_c_vary=True,nu_vary=True,y_vary=True,beta_vary=False,**kwargs):
-        """fit the coefficient of the taylor expansion of the scaling function, using generalized least square
+    def datacollapse_with_drift_GLS(
+        self,
+        n1: int,
+        n2: int,
+        p_c: float | None = None,
+        nu: float | None = None,
+        y: float | None = None,
+        beta: float = 0,
+        p_c_range: tuple[float, float] = (0, 1),
+        nu_range: tuple[float, float] = (0, 2),
+        y_range: tuple[float, float] = (0, 5),
+        beta_range: tuple[float, float] = (0, 2),
+        p_c_vary: bool = True,
+        nu_vary: bool = True,
+        y_vary: bool = True,
+        beta_vary: bool = False,
+        **kwargs,
+    ) -> MinimizerResult:
+        """Perform data collapse with GLS fitting for polynomial coefficients.
 
-        The scaling form is: y(p,L) = L^{-beta/nu} * sum_{j1,j2} a_{j1,j2} * x^{j1} * L^{-y*j2}
+        Fits critical exponents (p_c, nu, y, beta) while using generalized least
+        squares to solve for optimal polynomial coefficients. More efficient than
+        `datacollapse_with_drift` when the scaling function is well-approximated
+        by a polynomial.
+
+        The scaling form is:
+        y(p, L) = L^{-beta/nu} * sum_{j1,j2} a_{j1,j2} * x^{j1} * L^{-y*j2}
         where x = (p - p_c) * L^{1/nu}
+
+        Parameters
+        ----------
+        n1 : int
+            Maximum power of the relevant scaling variable x.
+        n2 : int
+            Maximum power of the irrelevant scaling variable L^{-y}.
+        p_c : float | None, optional
+            Initial guess for critical point.
+        nu : float | None, optional
+            Initial guess for correlation length exponent.
+        y : float | None, optional
+            Initial guess for irrelevant scaling exponent.
+        beta : float, optional
+            Initial guess for order parameter exponent, by default 0.
+        p_c_range : tuple[float, float], optional
+            Bounds (min, max) for p_c, by default (0, 1).
+        nu_range : tuple[float, float], optional
+            Bounds (min, max) for nu, by default (0, 2).
+        y_range : tuple[float, float], optional
+            Bounds (min, max) for y, by default (0, 5).
+        beta_range : tuple[float, float], optional
+            Bounds (min, max) for beta, by default (0, 2).
+        p_c_vary : bool, optional
+            Whether to fit p_c, by default True.
+        nu_vary : bool, optional
+            Whether to fit nu, by default True.
+        y_vary : bool, optional
+            Whether to fit y, by default True.
+        beta_vary : bool, optional
+            Whether to fit beta, by default False.
+        **kwargs
+            Additional arguments passed to `lmfit.minimize()`.
+
+        Returns
+        -------
+        MinimizerResult
+            The lmfit optimization result. Fitted values and polynomial
+            coefficients stored as attributes.
         """
         from lmfit import minimize, Parameters
 
@@ -241,7 +580,45 @@ class DataCollapse:
 
 
 
-    def plot_data_collapse(self,ax=None,drift=False,driftcollapse=False,plot_irrelevant=True,errorbar=False,abs=False,color_iter=None,raw=False,**kwargs):
+    def plot_data_collapse(
+        self,
+        ax: Axes | None = None,
+        drift: bool = False,
+        driftcollapse: bool = False,
+        plot_irrelevant: bool = True,
+        errorbar: bool = False,
+        abs: bool = False,
+        color_iter: Iterator[Any] | None = None,
+        raw: bool = False,
+        **kwargs,
+    ) -> None:
+        """Plot the data collapse results.
+
+        Visualizes the collapsed data with different options for showing
+        raw data, drift corrections, and irrelevant contributions.
+
+        Parameters
+        ----------
+        ax : Axes | None, optional
+            Matplotlib axes to plot on. If None, creates new figure.
+        drift : bool, optional
+            If True, plot results from drift-corrected fitting.
+        driftcollapse : bool, optional
+            If True with drift, plot collapsed data minus irrelevant part.
+            If False with drift, plot raw data with fitted curve.
+        plot_irrelevant : bool, optional
+            If True with driftcollapse, plot irrelevant contribution on twin axis.
+        errorbar : bool, optional
+            If True, show error bars on data points.
+        abs : bool, optional
+            If True, use absolute value of x-axis variable.
+        color_iter : Iterator[Any] | None, optional
+            Custom color iterator for different system sizes.
+        raw : bool, optional
+            If True, plot raw (unscaled) data.
+        **kwargs
+            Additional arguments passed to scatter/plot functions.
+        """
         import matplotlib.pyplot as plt
         if raw:
             x_i=self.p_i
@@ -336,13 +713,47 @@ class DataCollapse:
         # print(f'{self.params["Metrics"]}_Scaling_L({L_list[0]},{L_list[-1]})_adder({adder[0]}-{adder[1]}).png')
 
 
-def grid_search(n1_list,n2_list,p_c,nu,y,p_c_range,nu_range,verbose=False,**kwargs):
-    """grid search for the best n1 and n2
-    provided arguments: 
-    df=df_0_1
-    params={'Metrics':'O',}
-    Lmin,Lmax
-    p_range=[0.45,0.55]
+def grid_search(
+    n1_list: list[int],
+    n2_list: list[int],
+    p_c: float,
+    nu: float,
+    y: float,
+    p_c_range: tuple[float, float],
+    nu_range: tuple[float, float],
+    verbose: bool = False,
+    **kwargs,
+) -> dict[tuple[int, int], DataCollapse]:
+    """Grid search over polynomial orders (n1, n2) for optimal model selection.
+
+    Fits `datacollapse_with_drift_GLS` for each combination of (n1, n2) and
+    returns a dictionary of fitted models for comparison.
+
+    Parameters
+    ----------
+    n1_list : list[int]
+        List of n1 values (relevant scaling polynomial order) to search.
+    n2_list : list[int]
+        List of n2 values (irrelevant scaling polynomial order) to search.
+    p_c : float
+        Initial guess for critical point.
+    nu : float
+        Initial guess for correlation length exponent.
+    y : float
+        Initial guess for irrelevant scaling exponent.
+    p_c_range : tuple[float, float]
+        Bounds (min, max) for p_c.
+    nu_range : tuple[float, float]
+        Bounds (min, max) for nu.
+    verbose : bool, optional
+        If True, print (n1, n2) during fitting.
+    **kwargs
+        Arguments passed to DataCollapse constructor (df, p_, L_, params, etc.).
+
+    Returns
+    -------
+    dict[tuple[int, int], DataCollapse]
+        Dictionary mapping (n1, n2) to fitted DataCollapse objects.
     """
     # red_chi2_list=np.zeros((len(n1_list),len(n2_list)))
     from tqdm import tqdm
@@ -358,11 +769,26 @@ def grid_search(n1_list,n2_list,p_c,nu,y,p_c_range,nu_range,verbose=False,**kwar
         except:
             print(f'Fitting Failed for (n1={n1},n2={n2})')
         model_dict[(n1,n2)]=dc
-        
+
     return model_dict
 
-def plot_chi2_ratio(model_dict,L1=False):
-    """L1 means use L1 norm instead of variance"""
+def plot_chi2_ratio(
+    model_dict: dict[tuple[int, int], DataCollapse],
+    L1: bool = False,
+) -> None:
+    """Plot reduced chi-squared and irrelevant contribution ratio for model selection.
+
+    Creates a dual-axis plot showing reduced chi-squared (left axis) and
+    the ratio of irrelevant to total variance (right axis) as functions of n1.
+
+    Parameters
+    ----------
+    model_dict : dict[tuple[int, int], DataCollapse]
+        Dictionary from `grid_search()` mapping (n1, n2) to fitted models.
+    L1 : bool, optional
+        If True, use L1 norm for irrelevant ratio. If False (default),
+        use variance-based ratio (ESS_irr / TSS).
+    """
     import matplotlib.pyplot as plt
     fig,ax=plt.subplots()
     color_list=['r','b','c','m','y','k','g']
@@ -408,7 +834,19 @@ def plot_chi2_ratio(model_dict,L1=False):
     ax2.set_ylabel('Irrelevant contribution')
     ax2.fill_between(n1_list,0.,0.1,alpha=0.2,color='orange')
 
-def extrapolate_fitting(data,params,p_range,p_,L_,Lmin=12,Lmax=24,nu=1.3,p_c=0.5,threshold=(-1,1)):
+def extrapolate_fitting(
+    data: dict[Any, pd.DataFrame],
+    params: dict[str, Any],
+    p_range: list[float],
+    p_: str,
+    L_: str,
+    Lmin: int = 12,
+    Lmax: int = 24,
+    nu: float = 1.3,
+    p_c: float = 0.5,
+    threshold: tuple[float, float] = (-1, 1),
+) -> dict[Any, DataCollapse]:
+    """Fit data collapse across different threshold values (deprecated/unused)."""
     from tqdm import tqdm
     dc={}
     for key,val in tqdm(data.items()):
@@ -417,7 +855,12 @@ def extrapolate_fitting(data,params,p_range,p_,L_,Lmin=12,Lmax=24,nu=1.3,p_c=0.5
             dc[key].datacollapse(nu=nu,p_c=p_c,)
     return dc
 
-def plot_extrapolate_fitting(dc,ax=None):
+
+def plot_extrapolate_fitting(
+    dc: dict[Any, DataCollapse],
+    ax: Axes | None = None,
+) -> None:
+    """Plot extrapolate fitting results (deprecated/unused)."""
     import matplotlib.pyplot as plt
     if ax is None:
         fig,ax=plt.subplots()
@@ -437,16 +880,39 @@ def plot_extrapolate_fitting(dc,ax=None):
     ax.set_xlabel('Threshold of SV')
     ax.set_ylabel(r'$\nu$',color='k')
     ax2.set_ylabel(r'$p_c$',color='b')
+
 class optimal_df:
-    def __init__(self,names=['Metrics', 'p_proj', 'p_ctrl']):
+    """Container for storing optimal fitting results across different parameter sets."""
+
+    def __init__(self, names: list[str] | None = None) -> None:
+        """Initialize storage for optimal fitting results.
+
+        Parameters
+        ----------
+        names : list[str] | None, optional
+            Index level names for organizing results, by default
+            ['Metrics', 'p_proj', 'p_ctrl'].
+        """
         import pandas as pd
+        if names is None:
+            names = ['Metrics', 'p_proj', 'p_ctrl']
         self.names=names
         self.opt_df=pd.DataFrame(
                 columns=['p_c', 'p_c_error', 'nu', 'nu_error', 'y', 'y_error'],
                 index= pd.MultiIndex(levels=[[]]*len(names), codes=[[]]*len(names), names=names)
             )
 
-    def add_optimal(self,model):
+    def add_optimal(self, model: DataCollapse) -> None:
+        """Add fitting results from a DataCollapse model to storage.
+
+        Extracts p_c, nu, y and their errors from the fitted model and
+        appends them to `self.opt_df`.
+
+        Parameters
+        ----------
+        model : DataCollapse
+            Fitted DataCollapse object with `res` and `params` attributes.
+        """
         import pandas as pd
         df_new = pd.DataFrame([model])
         p_c_key=frozenset(self.names)-frozenset(model.params.keys())
@@ -469,7 +935,7 @@ class optimal_df:
             y=None
             y_error=None
         new={
-            'p_c':p_c, 
+            'p_c':p_c,
             'p_c_error':p_c_error,
             'nu': nu,
             'nu_error': nu_error,
@@ -482,7 +948,70 @@ class optimal_df:
     #     total=np.arange(len(self.opt_df))
     #     self.opt_df=self.opt_df.iloc([i for i in total if i not in loc])
         
-def bootstrapping(df,params,p_,L_,p_range,nu,p_c,rng=0,Lmin=None,Lmax=None,size=None,replace=True,method='leastsq',p_c_vary=True,nu_range=(.5,2),**kwargs):
+def bootstrapping(
+    df: pd.DataFrame,
+    params: dict[str, Any],
+    p_: str,
+    L_: str,
+    p_range: list[float],
+    nu: float,
+    p_c: float,
+    rng: int | np.random.Generator = 0,
+    Lmin: int | None = None,
+    Lmax: int | None = None,
+    size: int | None = None,
+    replace: bool = True,
+    method: str = 'leastsq',
+    p_c_vary: bool = True,
+    nu_range: tuple[float, float] = (0.5, 2),
+    **kwargs,
+) -> DataCollapse:
+    """Perform bootstrap resampling for error estimation.
+
+    Creates a resampled dataset by randomly sampling observations with
+    replacement, then fits a DataCollapse model. Repeat multiple times
+    to estimate parameter uncertainties.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame with MultiIndex and 'observations' column.
+    params : dict[str, Any]
+        Fixed parameter values to select from the DataFrame.
+    p_ : str
+        Name of the tuning parameter index level.
+    L_ : str
+        Name of the system size index level.
+    p_range : list[float]
+        Range [min, max] of tuning parameter to include.
+    nu : float
+        Initial guess for correlation length exponent.
+    p_c : float
+        Initial guess for critical point.
+    rng : int | np.random.Generator, optional
+        Random seed or generator for reproducibility.
+    Lmin : int | None, optional
+        Minimum system size to include.
+    Lmax : int | None, optional
+        Maximum system size to include.
+    size : int | None, optional
+        Number of samples to draw per observation. If None, use original size.
+    replace : bool, optional
+        Whether to sample with replacement, by default True.
+    method : str, optional
+        Optimization method for lmfit, by default 'leastsq'.
+    p_c_vary : bool, optional
+        Whether to fit p_c, by default True.
+    nu_range : tuple[float, float], optional
+        Bounds (min, max) for nu, by default (0.5, 2).
+    **kwargs
+        Additional arguments passed to DataCollapse constructor.
+
+    Returns
+    -------
+    DataCollapse
+        Fitted DataCollapse object on resampled data.
+    """
     rng=np.random.default_rng(rng)
     df_small=df.xs(params.values(),level=list(params.keys()),drop_level=False)
     df_resample=df_small.applymap(lambda x: rng.choice(x,size=len(x) if size is None else min(size,len(x)),replace=replace))
