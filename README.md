@@ -3,15 +3,21 @@
 Minimal, lmfit‑backed wrapper for estimating critical parameters via finite‑size scaling (FSS) and data collapse.
 
 ## Install
+With `pip`:
+```bash
+pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+```
+With `uv`:
 ```bash
 uv pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
 ```
+For development, install with `-e`:
+
 Alternatively, clone the repo and manually install
 ```bash
 git clone https://github.com/Pixley-Research-Group-in-CMT/FSS.git
 cd FSS
-pip install .            # or: pip install -e . for editable installs
-# uv users can skip cloning:
+pip install -e .      
 ```
 
 The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matplotlib, lmfit, tqdm).
