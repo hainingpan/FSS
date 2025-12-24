@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "FSS"
-version = "0.0.3"
+version = "0.0.4"
 description = "Finite size scaling analysis for phase transition (under development)"
 authors = [{ name = "Haining Pan", email = "hnpan@terpmail.umd.edu" }]
 readme = "README.md"
@@ -21,6 +21,7 @@ dependencies = [
   "matplotlib>3",
   "pandas>2",
   "tqdm",
+  "joblib",
 ]
 
 [dependency-groups]

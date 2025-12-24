@@ -712,6 +712,225 @@ class DataCollapse:
         # adder=self.df.index.get_level_values('adder').unique().tolist()[0]
         # print(f'{self.params["Metrics"]}_Scaling_L({L_list[0]},{L_list[-1]})_adder({adder[0]}-{adder[1]}).png')
 
+    def parameter_sweep(
+        self,
+        p_c: np.ndarray | list[float] | float,
+        nu: np.ndarray | list[float] | float,
+        beta: np.ndarray | list[float] | float = 0,
+        p_c_range: tuple[float, float] | None = None,
+        nu_range: tuple[float, float] = (0.5, 2),
+        beta_range: tuple[float, float] = (0, 1),
+        ax: Axes | None = None,
+        colorbar_position: str = 'right',
+        n_jobs: int = -1,
+        backend: str = 'threading',
+    ) -> dict[str, Any]:
+        """Sweep over two parameters to visualize reduced chi-squared landscape.
+
+        Computes reduced chi-squared for a 2D grid of parameter values, displays
+        a pcolormesh plot, and extracts optimal values with error bounds from
+        a contour at 1.3× the minimum chi-squared.
+
+        Note: This method only supports the basic data collapse (without scaling
+        corrections). 
+
+        **Convention:** Each parameter (p_c, nu, beta) can be:
+
+        - A list or array → swept over (used as grid axis)
+        - A scalar → held fixed at that value
+
+        Exactly 2 parameters must be arrays; the third must be a scalar.
+
+        Parameters
+        ----------
+        p_c : array-like or float
+            Critical point values. If array, swept over; if scalar, held fixed.
+        nu : array-like or float
+            Correlation length exponent values. If array, swept; if scalar, fixed.
+        beta : array-like or float, optional
+            Order parameter exponent values. Default is 0 (scalar, fixed).
+        p_c_range : tuple[float, float] or None, optional
+            Bounds for p_c during internal fitting calls.
+        nu_range : tuple[float, float], optional
+            Bounds for nu during internal fitting calls, by default (0.5, 2).
+        beta_range : tuple[float, float], optional
+            Bounds for beta during internal fitting calls, by default (0, 1).
+        ax : Axes or None, optional
+            Matplotlib axes. If None, creates new figure.
+        colorbar_position : str, optional
+            Position of colorbar: 'right' or 'top', by default 'right'.
+        n_jobs : int, optional
+            Number of parallel jobs. Default -1 uses all CPU cores.
+            Set to 1 for serial execution (no parallelization).
+        backend : str, optional
+            Joblib backend: 'loky' (multiprocessing, default) or 'threading'.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary with keys:
+
+            - 'p_c', 'nu', 'beta': optimal values at minimum chi-squared
+            - 'p_c_error', 'nu_error', 'beta_error': (min, max) tuples from contour
+              (None for the fixed parameter)
+            - 'chi2_grid': the computed chi-squared array
+
+        Raises
+        ------
+        NotImplementedError
+            If not exactly 2 parameters are arrays.
+
+        Examples
+        --------
+        >>> # Sweep p_c and nu, fix beta=0
+        >>> result = dc.parameter_sweep(
+        ...     p_c=np.linspace(0.4, 0.6, 20),
+        ...     nu=np.linspace(0.8, 1.5, 20),
+        ...     beta=0,
+        ... )
+
+        >>> # Sweep nu and beta, fix p_c=0.5
+        >>> result = dc.parameter_sweep(
+        ...     p_c=0.5,
+        ...     nu=np.linspace(0.8, 1.5, 20),
+        ...     beta=np.linspace(0, 0.5, 15),
+        ... )
+        """
+        import matplotlib.pyplot as plt
+
+        def is_iterable(x):
+            return isinstance(x, (list, np.ndarray))
+
+        # Classify parameters as sweep or fixed, preserving order
+        param_info = [
+            ('p_c', p_c, self.p_),
+            ('nu', nu, r'$\nu$'),
+            ('beta', beta, r'$\beta$'),
+        ]
+        sweep_params = []
+        fixed_params = {}
+        for name, val, label in param_info:
+            if is_iterable(val):
+                sweep_params.append((name, np.asarray(val), label))
+            else:
+                fixed_params[name] = val
+
+        if len(sweep_params) != 2:
+            raise NotImplementedError(
+                f"Exactly 2 parameter arrays required for pcolormesh, got {len(sweep_params)}. "
+                "Pass arrays for 2 parameters and a scalar for the third."
+            )
+
+        # Extract sweep arrays (order preserved from signature)
+        name1, arr1, label1 = sweep_params[0]
+        name2, arr2, label2 = sweep_params[1]
+
+        # Define chi2 computation function
+        def compute_chi2(i, j):
+            params = dict(fixed_params)
+            params[name1] = arr1[i]
+            params[name2] = arr2[j]
+            try:
+                res = self.datacollapse(
+                    p_c=params['p_c'], nu=params['nu'], beta=params['beta'],
+                    p_c_vary=False, nu_vary=False, beta_vary=False,
+                    p_c_range=p_c_range if p_c_range else (0, 1),
+                    nu_range=nu_range, beta_range=beta_range,
+                )
+                return i, j, res.redchi
+            except Exception:
+                return i, j, np.nan
+
+        # Generate all tasks
+        tasks = [(i, j) for i in range(len(arr1)) for j in range(len(arr2))]
+
+        # Execute
+        if n_jobs == 1:
+            results = [compute_chi2(i, j) for i, j in tasks]
+        else:
+            from joblib import Parallel, delayed
+            results = Parallel(n_jobs=n_jobs, backend=backend)(
+                delayed(compute_chi2)(i, j) for i, j in tasks
+            )
+
+        # Assemble grid
+        chi2_grid = np.zeros((len(arr1), len(arr2)))
+        for i, j, val in results:
+            chi2_grid[i, j] = val
+
+        # Create axes if needed
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(4, 4))
+
+        # Plot pcolormesh
+        im = ax.pcolormesh(
+            arr2, arr1, np.log(chi2_grid),
+            cmap='seismic',
+            # vmax=np.log(2.6 * np.nanmin(chi2_grid))
+        )
+
+        # Set axis labels (first sweep param → ylabel, second → xlabel)
+        ax.set_ylabel(rf'${label1}$' if not label1.startswith('$') else label1)
+        ax.set_xlabel(rf'${label2}$' if not label2.startswith('$') else label2)
+
+        # Add colorbar
+        if colorbar_position == 'right':
+            plt.colorbar(im, ax=ax, label=r'$\log(\chi_\nu^2)$')
+        elif colorbar_position == 'top':
+            axins = ax.inset_axes([0.4, 1.02, 0.6, 0.05])
+            plt.colorbar(im, cax=axins, label='', orientation='horizontal')
+            axins.xaxis.tick_top()
+            axins.text(0.4, 1.02, r'$\log(\chi_\nu^2)$', ha='right', va='bottom', transform=ax.transAxes)
+
+        # Find minimum and plot marker
+        idx1, idx2 = np.unravel_index(np.nanargmin(chi2_grid), chi2_grid.shape)
+        ax.plot(arr2[idx2], arr1[idx1], marker='x', color='red', markersize=10)
+
+        # Draw contour at 1.3× minimum
+        pts = ax.contour(
+            arr2, arr1, chi2_grid,
+            levels=[1.3 * chi2_grid[idx1, idx2]],
+            colors='y'
+        )
+
+        # Select contour with most vertices (longest)
+        paths = pts.get_paths()
+        if paths:
+            longest_path = max(paths, key=lambda p: len(p.vertices))
+            vertices = longest_path.vertices
+            error1 = (vertices[:, 1].min(), vertices[:, 1].max())
+            error2 = (vertices[:, 0].min(), vertices[:, 0].max())
+        else:
+            error1 = (np.nan, np.nan)
+            error2 = (np.nan, np.nan)
+
+        # Build result dict
+        result = {
+            'p_c': None,
+            'nu': None,
+            'beta': None,
+            'p_c_error': None,
+            'nu_error': None,
+            'beta_error': None,
+            'chi2_grid': chi2_grid,
+        }
+
+        # Set optimal values
+        result[name1] = arr1[idx1]
+        result[name2] = arr2[idx2]
+        for fname, fval in fixed_params.items():
+            result[fname] = fval
+
+        # Set errors for swept params
+        result[f'{name1}_error'] = error1
+        result[f'{name2}_error'] = error2
+
+        # Print summary
+        print(f'{name1}={arr1[idx1]:.4f}, {name2}={arr2[idx2]:.4f}, chi2={chi2_grid[idx1, idx2]:.4f}')
+        print(f'{name1} error=({error1[0]:.4f}, {error1[1]:.4f}), {name2} error=({error2[0]:.4f}, {error2[1]:.4f})')
+
+        return result
+
 
 def grid_search(
     n1_list: list[int],
@@ -833,6 +1052,7 @@ def plot_chi2_ratio(
     ax.set_ylabel(r'$\chi_{\nu}^2$')
     ax2.set_ylabel('Irrelevant contribution')
     ax2.fill_between(n1_list,0.,0.1,alpha=0.2,color='orange')
+
 
 def extrapolate_fitting(
     data: dict[Any, pd.DataFrame],

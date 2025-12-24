@@ -69,6 +69,39 @@ Synthetic parameters: $p_c=0.5$, $\nu=1.0$, $\beta=0.5$; $p\in[0.45,0.55]$ (11 p
 |:--------:|:-------------:|
 | <img src="figures/before_collapse.png" alt="Raw data" width="320"/> | <img src="figures/after_collapse.png" alt="Data collapse" width="320"/> |
 
+### Finding good initial values
+
+In some cases, the optimization landscape has many local minima—especially when the data is noisy or the scaling function is complex. The optimizer may get stuck or barely move from a poor starting point.
+
+When this happens, a coarse grid search over the parameter space can help identify a good initial guess. By sweeping over ranges of $(p_c, \nu, \beta)$ and evaluating the reduced $\chi^2$ at each point, you can visualize where the global minimum lies and choose starting values that avoid local traps.
+
+Usage:
+```python
+df=generate_pseudo_data(pc=0.5,nu=1,beta=0.0, epsilon=0.1)
+dc=DataCollapse(df, p_='p',L_='L',params={},p_range=[0.45,0.55],)
+result = dc.parameter_sweep(
+    p_c=np.linspace(0.48, 0.52, 20),
+    nu=np.linspace(0.75, 1.25, 20),
+    beta=0,
+    n_jobs=-1,  # use all cores
+    backend='threading',  # multiprocessing
+)
+```
+Output: 
+```
+p_c=0.5011, nu=0.9868, chi2=0.9882
+p_c error=(0.4977, 0.5032), nu error=(0.9335, 1.1107)
+```
+with figure:
+<p align="center">
+<img src="figures/parameter_sweep.png" alt="Parameter sweep" width="480"/>
+</p>
+
+The figure above shows the reduced $\chi^2$ as a function of $(p_c, \nu)$. The dark region indicates where the fit quality is best, guiding the choice of initial parameters for the nonlinear optimizer.
+See `example.ipynb` for full code.
+
+> **Note:** `parameter_sweep` only supports the basic data collapse (without scaling corrections). 
+
 ## Theory (finite‑size scaling)
 For a continuous phase transition, an observable $y$ near the critical point $p_c$ obeys the scaling form
 
