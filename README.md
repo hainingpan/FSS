@@ -263,6 +263,23 @@ For bug reports, questions, or feature requests, please open an issue on GitHub.
 3. Ensure tests pass (`pytest`)
 4. Submit a pull request
 
+## Citation
+
+If you use this package in your research, please cite:
+
+```bibtex
+@software{pan2025fss,
+  author       = {Haining Pan},
+  title        = {FSS: Finite-Size Scaling Toolkit},
+  year         = {2025},
+  publisher    = {GitHub},
+  journal      = {GitHub repository},
+  url          = {https://github.com/Pixley-Research-Group-in-CMT/FSS},
+  version      = {0.0.4}
+}
+```
+
+
 ## License
 BSD 3‑Clause License. You may use, modify, and redistribute the code (source or binary) provided you:
 - retain the copyright notice, conditions, and disclaimer in source;

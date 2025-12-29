@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "FSS: Finite-Size Scaling Toolkit"
+authors:
+  - family-names: Pan
+    given-names: Haining
+    affiliation: Rutgers University
+repository-code: "https://github.com/Pixley-Research-Group-in-CMT/FSS"
+url: "https://github.com/Pixley-Research-Group-in-CMT/FSS"
+license: BSD-3-Clause
+version: 0.0.4
+date-released: 2025-01-01
