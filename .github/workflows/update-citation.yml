@@ -1,0 +1,42 @@
+name: Sync CITATION.cff version
+
+on:
+  push:
+    paths:
+      - pyproject.toml
+    branches:
+      - main
+
+jobs:
+  sync-citation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check and update CITATION.cff version
+        id: update
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          CURRENT=$(grep "^version:" CITATION.cff | sed 's/version: //')
+          if [ "$VERSION" != "$CURRENT" ]; then
+            sed -i "s/^version: .*/version: $VERSION/" CITATION.cff
+            echo "updated=true" >> $GITHUB_OUTPUT
+            echo "Updated CITATION.cff: $CURRENT -> $VERSION"
+          else
+            echo "updated=false" >> $GITHUB_OUTPUT
+            echo "CITATION.cff already at version $VERSION"
+          fi
+
+      - name: Commit changes
+        if: steps.update.outputs.updated == 'true'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: sync CITATION.cff version with pyproject.toml"
+          file_pattern: CITATION.cff
