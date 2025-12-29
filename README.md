@@ -11,14 +11,6 @@ With `uv`:
 ```bash
 uv pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
 ```
-For development, install with `-e`:
-
-Alternatively, clone the repo and manually install
-```bash
-git clone https://github.com/Pixley-Research-Group-in-CMT/FSS.git
-cd FSS
-pip install -e .      
-```
 
 The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matplotlib, lmfit, tqdm).
 
@@ -242,6 +234,35 @@ Optimization is powered by lmfit; extra keyword arguments are passed through to 
 
 Other utilities: `extrapolate_fitting`, `plot_extrapolate_fitting`, `optimal_df`, `bootstrapping`.
 
+## Contributing
+
+Contributions are welcome.
+
+### Development Setup
+For local development, clone the repo and install with dev dependencies:
+```bash
+git clone https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+cd FSS
+pip install -e ".[dev]"
+```
+
+### Running Tests
+
+```bash
+pytest
+```
+
+### Issues
+
+For bug reports, questions, or feature requests, please open an issue on GitHub.
+
+### Pull Requests
+
+1. Fork the repository
+2. Create a branch for your changes
+3. Ensure tests pass (`pytest`)
+4. Submit a pull request
+
 ## License
 BSD 3‑Clause License. You may use, modify, and redistribute the code (source or binary) provided you:
 - retain the copyright notice, conditions, and disclaimer in source;
@@ -254,6 +275,8 @@ Provided “AS IS” without warranties; see full text in `LICENSE`.
 - [ ] Better documentation (full API, examples)
 - [x] Package-ify (standard Python package with pyproject.toml, versioning, wheels, etc.)
 - [ ] Bootstrap method to estimate error bars (expose, document, examples)
+- [ ] Zenodo DOI for releases
+- [ ] Release to pypi index
 
 ## Contact
 Author: Haining Pan — hnpan@terpmail.umd.edu
