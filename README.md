@@ -34,22 +34,23 @@ Note that one needs to set `estimator='manual'` in `DataCollapse` to enable this
 import numpy as np, pandas as pd
 from fss import DataCollapse
 
-# Build toy data
-rng = np.random.default_rng(0)
-p_list = np.round(np.linspace(0.45, 0.55, 11), 2)
-L_list = np.arange(10, 20, 2)
+# Helper to generate synthetic FSS data
+def generate_pseudo_data(pc=0.5, nu=1, beta=0.5,
+                         p_list=np.round(np.linspace(0.45, 0.55, 11), 2),
+                         L_list=np.arange(10, 20, 2),
+                         f=lambda x: (1-x)**0.5, epsilon=0.01, N=100, seed=0):
+    """Generate y ~ L^{-beta/nu} * f((p-pc)*L^{1/nu}) + noise"""
+    rng = np.random.default_rng(seed)
+    data = {(p, L): L**(-beta/nu) * f((p-pc) * L**(1/nu)) + rng.normal(0, epsilon, N)
+            for L in L_list for p in p_list}
+    index = pd.MultiIndex.from_tuples(list(data.keys()), names=['p', 'L'])
+    return pd.DataFrame({'observations': list(data.values())}, index=index)
 
-data = {}
-for L in L_list:
-    for p in p_list:
-        y = rng.normal(0.0, 0.01, 100)  # replace with your observable samples
-        data[(p, L)] = y
-
-index = pd.MultiIndex.from_tuples(list(data.keys()), names=["p", "L"]) 
-df = pd.DataFrame({"observations": data.values()}, index=index)
+# Generate toy data with known parameters
+df = generate_pseudo_data(pc=0.5, nu=1.0, beta=0.5)
 
 # Collapse
-dc = DataCollapse(df, p_="p", L_="L", params={}, p_range=[0.45, 0.55])
+dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
 res = dc.datacollapse(p_c=0.501, nu=1.0, beta=0.0, p_c_vary=True, nu_vary=True, beta_vary=True)
 print(res.params)
 ```
@@ -67,10 +68,10 @@ In some cases, the optimization landscape has many local minima—especially whe
 
 When this happens, a coarse grid search over the parameter space can help identify a good initial guess. By sweeping over ranges of $(p_c, \nu, \beta)$ and evaluating the reduced $\chi^2$ at each point, you can visualize where the global minimum lies and choose starting values that avoid local traps.
 
-Usage:
+Usage (using `generate_pseudo_data` defined above):
 ```python
-df=generate_pseudo_data(pc=0.5,nu=1,beta=0.0, epsilon=0.1)
-dc=DataCollapse(df, p_='p',L_='L',params={},p_range=[0.45,0.55],)
+df = generate_pseudo_data(pc=0.5, nu=1, beta=0.0, epsilon=0.1)  # noisier data with larger epsilon
+dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
 result = dc.parameter_sweep(
     p_c=np.linspace(0.48, 0.52, 20),
     nu=np.linspace(0.75, 1.25, 20),
@@ -85,7 +86,7 @@ p_c=0.5011, nu=0.9868, chi2=0.9882
 p_c error=(0.4977, 0.5032), nu error=(0.9335, 1.1107)
 ```
 with figure:
-<p align="center">
+<p align="left">
 <img src="figures/parameter_sweep.png" alt="Parameter sweep" width="480"/>
 </p>
 
@@ -136,7 +137,7 @@ where:
 - $y$: correction-to-scaling exponent
 - $n_1$: polynomial order for the scaling function $f(x)$
 - $n_2$: polynomial order for corrections ($n_2 = 0$ recovers standard scaling)
-- $a_{j_1 j_2}$: Taylor coefficients (fitted via GLS)
+- $a_{j_1 j_2}$: Taylor coefficients (fitted via generalized least squares)
 
 The observable decomposes into:
 - **Relevant part** (universal scaling function): $f(x) = \sum_{j_1=0}^{n_1} a_{j_1, 0} \, x^{j_1}$

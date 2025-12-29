@@ -59,3 +59,20 @@ def test_datacollapse_with_drift_GLS():
     assert abs(res.params['p_c'].value - p_c_true) < 0.05
     assert abs(res.params['nu'].value - nu_true) < 0.3
     assert abs(res.params['y'].value - y_true) < 0.5
+
+
+def test_parameter_sweep():
+    """Test parameter_sweep finds correct parameters."""
+    p_c_true, nu_true, beta_true = 0.5, 1.0, 0.0
+    df = generate_pseudo_data(pc=p_c_true, nu=nu_true, beta=beta_true, epsilon=0.1)
+
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
+    result = dc.parameter_sweep(
+        p_c=np.linspace(0.48, 0.52, 10),
+        nu=np.linspace(0.8, 1.2, 10),
+        beta=0,
+        n_jobs=1,
+    )
+
+    assert abs(result['p_c'] - p_c_true) < 0.05
+    assert abs(result['nu'] - nu_true) < 0.3
