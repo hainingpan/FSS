@@ -28,11 +28,29 @@ The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matpl
 - One column: "observations"; each cell holds an array/list of samples for that (p, L).
 - Example: index tuple (p=0.40, L=10) → observations: array([...]).
 
-![alt text](figures/df_observations.png)
+```
+                       observations
+p    L
+0.45 10   [0.389, 0.386, 0.394, ...]
+0.46 10   [0.379, 0.384, 0.373, ...]
+0.47 10   [0.354, 0.354, 0.345, ...]
+0.48 10   [0.358, 0.353, 0.352, ...]
+0.49 10   [0.328, 0.337, 0.317, ...]
+...
+```
 - Alternatively, the package accepts a dataframe with two columns `estimator` and `standard_error` to set the value directly to `self.y_i` and `self.d_i`. 
 (This would be useful if the estimator is not a simple `mean`. For example, the estimator is variance or binder cumulant and standard error is obtained from bootstrapping)
 
-![alt text](figures/df_estimator.png)
+```
+         estimator  standard_error
+p    L
+0.45 10   0.388109        0.000962
+0.46 10   0.373660        0.000956
+0.47 10   0.359175        0.001116
+0.48 10   0.346020        0.000924
+0.49 10   0.331783        0.001084
+...
+```
 
 Note that one needs to set `estimator='manual'` in `DataCollapse` to enable this.
 
