@@ -12,6 +12,15 @@ With `uv`:
 uv pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
 ```
 
+To update to the latest version, with `pip`, use `-U`:
+```bash
+pip install -U git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+```
+With `uv`:
+```bash
+uv pip install -U git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+```
+
 The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matplotlib, lmfit, tqdm).
 
 ## Data format

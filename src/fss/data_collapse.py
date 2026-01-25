@@ -866,6 +866,7 @@ class DataCollapse:
         im = ax.pcolormesh(
             arr2, arr1, np.log(chi2_grid),
             cmap='seismic',
+            shading='auto',
             # vmax=np.log(2.6 * np.nanmin(chi2_grid))
         )
 
