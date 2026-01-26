@@ -1,0 +1,38 @@
+name: Sync with Upstream
+
+permissions:
+  contents: write
+  actions: write  # Needed for the Keepalive action to work
+
+on:
+  schedule:
+    - cron: "0 * * * *" # Runs every hour
+  workflow_dispatch:
+
+jobs:
+  sync_with_upstream:
+    runs-on: ubuntu-latest
+    name: Sync main with upstream
+    
+    # Only run this if we are inside the Pixley Fork
+    if: github.repository == 'Pixley-Research-Group-in-CMT/FSS'
+
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Sync upstream changes
+        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
+        with:
+          upstream_sync_repo: hainingpan/FSS
+          upstream_sync_branch: main
+          target_sync_branch: main
+          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
+          test_mode: false
+
+      # prevents the 60-day hibernation
+      - name: Keepalive Workflow
+        uses: gautamkrishnar/keepalive-workflow@v1
