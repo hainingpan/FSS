@@ -2,12 +2,11 @@ name: Sync with Upstream
 
 permissions:
   contents: write
-  actions: write  # Needed for the Keepalive action to work
 
 on:
   schedule:
     - cron: "0 * * * *" # Runs every hour
-  workflow_dispatch:
+  workflow_dispatch:      # Allows manual trigger
 
 jobs:
   sync_with_upstream:
@@ -18,21 +17,32 @@ jobs:
     if: github.repository == 'Pixley-Research-Group-in-CMT/FSS'
 
     steps:
+      # 1. Use the official Checkout action (Allowed by default)
       - name: Checkout target repo
         uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync upstream changes
-        uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
-        with:
-          upstream_sync_repo: hainingpan/FSS
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }}
-          test_mode: false
+      # 2. Manually merge using standard Git (Bypasses the 3rd party block)
+      - name: Merge Upstream
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          
+          git remote add upstream https://github.com/hainingpan/FSS.git
+          git fetch upstream
+          git merge upstream/main --ff-only
+          git push origin main
 
-      # prevents the 60-day hibernation
-      - name: Keepalive Workflow
-        uses: gautamkrishnar/keepalive-workflow@v1
+      # 3. Simple Anti-Hibernation Script
+      - name: Anti-Hibernation Ping
+        run: |
+          last_commit=$(git log -1 --format=%ct)
+          now=$(date +%s)
+          days_diff=$(( ($now - $last_commit) / 86400 ))
+          if [ $days_diff -gt 50 ]; then
+            git commit --allow-empty -m "Keepalive ping"
+            git push origin main
+          fi
