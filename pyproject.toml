@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "FSS"
-version = "0.0.4"
+version = "0.0.5"
 description = "Finite size scaling analysis for phase transition (under development)"
 authors = [{ name = "Haining Pan", email = "hnpan@terpmail.umd.edu" }]
 readme = "README.md"

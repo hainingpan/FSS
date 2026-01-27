@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Iterator, Any
-
+import re
+import matplotlib.pyplot as plt
 import numpy as np
 
 if TYPE_CHECKING:
@@ -20,6 +21,40 @@ __all__ = [
     "optimal_df",
     "bootstrapping",
 ]
+
+_MATH_TOKEN_RE = re.compile(r"^(?:[A-Za-z]|\\[A-Za-z]+)(?:_(?:[A-Za-z]|\\[A-Za-z]+))?$")
+
+
+def _strip_math_delimiters(token: str) -> tuple[str, bool]:
+    if token.startswith("$") and token.endswith("$") and len(token) >= 2:
+        return token[1:-1], True
+    return token, False
+
+
+def _is_simple_math_token(token: str) -> bool:
+    return _MATH_TOKEN_RE.match(token) is not None
+
+
+def _format_token(token: str) -> str:
+    token, forced_math = _strip_math_delimiters(token)
+    if forced_math or _is_simple_math_token(token):
+        return f"${token}$"
+    return token
+
+
+def _append_subscript(token: str, subscript: str) -> str:
+    token, forced_math = _strip_math_delimiters(token)
+    if forced_math or _is_simple_math_token(token):
+        return f"${{{token}}}_{subscript}$"
+    return f"{token}$_{subscript}$"
+
+
+def _format_exponent(token: str, exponent: str) -> tuple[str, bool]:
+    formatted = _format_token(token)
+    formatted, forced_math = _strip_math_delimiters(formatted)
+    if forced_math:
+        return f"{formatted}^{{{exponent}}}", True
+    return f"{formatted}$^{{{exponent}}}$", False
 
 class DataCollapse:
     """Finite-size scaling data collapse analysis using lmfit optimization."""
@@ -619,7 +654,16 @@ class DataCollapse:
         **kwargs
             Additional arguments passed to scatter/plot functions.
         """
-        import matplotlib.pyplot as plt
+        def _wrap_math(label: str, is_math: bool) -> str:
+            return f"${label}$" if is_math else label
+
+        def _title_from_params(params: list[tuple[str, float, float | None]]) -> str:
+            if all(stderr is not None for _, _, stderr in params):
+                parts = [f"{label}={value:.3f}$\\pm${stderr:.3f}" for label, value, stderr in params]
+            else:
+                parts = [f"{label}={value:.3f}" for label, value, _ in params]
+            return ",".join(parts)
+
         if raw:
             x_i=self.p_i
             y_i=self.y_i
@@ -640,7 +684,14 @@ class DataCollapse:
         color_r_iter = iter(plt.cm.Reds(0.4+0.6*(i/L_list.shape[0])) for i in range(L_list.shape[0]))
         if drift and driftcollapse and plot_irrelevant:
             ax2=ax.twinx()
-            ax2.set_ylabel(r'$y_{irre}$')  # TODO: needs to adapt finite beta
+            l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+            if hasattr(self, "y_i_scaled"):
+                if l_is_math:
+                    ax2.set_ylabel(rf"$y_{{irre}} {l_label}$")
+                else:
+                    ax2.set_ylabel(rf"$y_{{irre}}$ {l_label}")
+            else:
+                ax2.set_ylabel(r"$y_{irre}$")
         for L,(start_idx,end_idx) in L_dict.items():
             color=next(color_iter)
             if drift:
@@ -670,41 +721,71 @@ class DataCollapse:
                     ax.errorbar(x,y_i[start_idx:end_idx],yerr=d_i[start_idx:end_idx],label=f'{L}',color=color,capsize=3,**kwargs)
                 else:
                     ax.scatter(x,y_i[start_idx:end_idx],label=f'{L}',color=color,**kwargs)
-        # TODO: The following logic is a bit messy, need to refactor
         if raw:
-            ax.set_ylabel(rf'$y_i $')
+            ax.set_ylabel(r"$y_i$")
         else:
-            ax.set_ylabel(rf'$y_i ~{{{self.L_}}}^{{\beta/\nu}}$')
+            l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+            if l_is_math:
+                ax.set_ylabel(rf"$y_i {l_label}$")
+            else:
+                ax.set_ylabel(rf"$y_i$ {l_label}")
         if raw:
-            ax.set_xlabel(f'${{{self.p_}}}_i$')
+            ax.set_xlabel(_append_subscript(self.p_, "i"))
         else:
             if drift:
                 if not driftcollapse:
-                    ax.set_xlabel(f'${{{self.p_}}}_i$')
-                    # TODO: check whether errorbar exists before
-                    try:
-                        ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f}$\pm${self.res.params["p_c"].stderr:.3f},$\nu$={self.nu:.3f}$\pm${self.res.params["nu"].stderr:.3f},$y$= {self.y:.3f}$\pm${self.res.params["y"].stderr:.3f}')
-                    except:
-                        ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f},$\nu$={self.nu:.3f},$y$= {self.y:.3f}')
+                    ax.set_xlabel(_append_subscript(self.p_, "i"))
+                    ax.set_ylabel(r"$y_i$")
+                    ax.set_title(
+                        _title_from_params(
+                            [
+                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                                (r"$y$", self.y, self.res.params["y"].stderr),
+                            ]
+                        )
+                    )
 
                 else:
                     ax.set_xlabel(r'$x_i$')
-                    try:
-                        ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f}$\pm${self.res.params["p_c"].stderr:.3f},$\nu$={self.nu:.3f}$\pm${self.res.params["nu"].stderr:.3f},$y$= {self.y:.3f}$\pm${self.res.params["y"].stderr:.3f}')
-                    except:
-                        ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f},$\nu$={self.nu:.3f},$y$= {self.y:.3f}')
-
-                    ax.set_ylabel(r'$y_i-y_{irre}$') # TODO: needs to adapt finite beta
+                    ax.set_title(
+                        _title_from_params(
+                            [
+                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                                (r"$y$", self.y, self.res.params["y"].stderr),
+                            ]
+                        )
+                    )
+                    l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+                    if hasattr(self, "y_i_scaled"):
+                        if l_is_math:
+                            ax.set_ylabel(rf"$(y_i - y_{{irre}}) {l_label}$")
+                        else:
+                            ax.set_ylabel(rf"$(y_i - y_{{irre}})$ {l_label}")
+                    else:
+                        ax.set_ylabel(r"$y_i - y_{irre}$")
             else:
+                l_label, l_is_math = _format_exponent(self.L_, r"1/\nu")
+                l_label = _wrap_math(l_label, l_is_math)
                 if abs:
-                    ax.set_xlabel(f'$|{{{self.p_}}}_i-{{{self.p_}}}_c|{{{self.L_}}}^{{1/\\nu}}$')
+                    ax.set_xlabel(
+                        f"|{_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}| {l_label}"
+                    )
                 else:
-                    ax.set_xlabel(f'$({{{self.p_}}}_i-{{{self.p_}}}_c){{{self.L_}}}^{{1/\\nu}}$')
+                    ax.set_xlabel(
+                        f"({_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}) {l_label}"
+                    )
                 # ax.set_title(rf'$p_c={self.p_c:.3f},\nu={self.nu:.3f}$')
-                try:
-                    ax.set_title(rf'${{{self.p_}}}_c$={self.p_c:.3f}$\pm${self.res.params["p_c"].stderr:.3f},$\nu$={self.nu:.3f}$\pm${self.res.params["nu"].stderr:.3f},$\beta$={self.beta:.3f}$\pm${self.res.params["beta"].stderr:.3f}')
-                except:
-                    ax.set_title(rf'${{{{{self.p_}}}}}_c$={self.p_c:.3f},$\nu$={self.nu:.3f},$\beta$={self.beta:.3f}')
+                ax.set_title(
+                    _title_from_params(
+                        [
+                            (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                            (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                            (r"$\beta$", self.beta, self.res.params["beta"].stderr),
+                        ]
+                    )
+                )
 
         ax.legend()
         ax.grid('on')
@@ -858,21 +939,51 @@ class DataCollapse:
         for i, j, val in results:
             chi2_grid[i, j] = val
 
+        def _trim_nan_edges(values: np.ndarray, grid: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+            if axis == 0:
+                valid = ~np.all(np.isnan(grid), axis=1)
+            else:
+                valid = ~np.all(np.isnan(grid), axis=0)
+            if not np.any(valid):
+                return values, grid
+            start = int(np.argmax(valid))
+            end = int(len(valid) - np.argmax(valid[::-1]))
+            if axis == 0:
+                return values[start:end], grid[start:end, :]
+            return values[start:end], grid[:, start:end]
+
+        plot_arr1, plot_grid = _trim_nan_edges(arr1, chi2_grid, axis=0)
+        plot_arr2, plot_grid = _trim_nan_edges(arr2, plot_grid, axis=1)
+
         # Create axes if needed
         if ax is None:
             fig, ax = plt.subplots(figsize=(4, 4))
 
+        def _edges_from_centers(values: np.ndarray) -> np.ndarray:
+            if values.size == 1:
+                return np.array([values[0] - 0.5, values[0] + 0.5])
+            deltas = np.diff(values)
+            first = values[0] - deltas[0] / 2
+            last = values[-1] + deltas[-1] / 2
+            mids = values[:-1] + deltas / 2
+            return np.concatenate([[first], mids, [last]])
+
         # Plot pcolormesh
         im = ax.pcolormesh(
-            arr2, arr1, np.log(chi2_grid),
+            plot_arr2, plot_arr1, np.log(plot_grid),
             cmap='seismic',
             shading='auto',
             # vmax=np.log(2.6 * np.nanmin(chi2_grid))
         )
+        ax.margins(x=0, y=0)
+        x_edges = _edges_from_centers(plot_arr2)
+        y_edges = _edges_from_centers(plot_arr1)
+        ax.set_xlim(x_edges[0], x_edges[-1])
+        ax.set_ylim(y_edges[0], y_edges[-1])
 
         # Set axis labels (first sweep param → ylabel, second → xlabel)
-        ax.set_ylabel(rf'${label1}$' if not label1.startswith('$') else label1)
-        ax.set_xlabel(rf'${label2}$' if not label2.startswith('$') else label2)
+        ax.set_ylabel(_format_token(label1))
+        ax.set_xlabel(_format_token(label2))
 
         # Add colorbar
         if colorbar_position == 'right':
@@ -884,15 +995,21 @@ class DataCollapse:
             axins.text(0.4, 1.02, r'$\log(\chi_\nu^2)$', ha='right', va='bottom', transform=ax.transAxes)
 
         # Find minimum and plot marker
-        idx1, idx2 = np.unravel_index(np.nanargmin(chi2_grid), chi2_grid.shape)
-        ax.plot(arr2[idx2], arr1[idx1], marker='x', color='red', markersize=10)
+        idx1, idx2 = np.unravel_index(np.nanargmin(plot_grid), plot_grid.shape)
+        ax.plot(plot_arr2[idx2], plot_arr1[idx1], marker='x', color='red', markersize=10)
 
         # Draw contour at 1.3× minimum
         pts = ax.contour(
-            arr2, arr1, chi2_grid,
-            levels=[1.3 * chi2_grid[idx1, idx2]],
+            plot_arr2, plot_arr1, plot_grid,
+            levels=[1.3 * plot_grid[idx1, idx2]],
             colors='y'
         )
+
+        # Re-apply bounds to avoid autoscale margins after contour/marker
+        ax.margins(x=0, y=0)
+        ax.set_xlim(x_edges[0], x_edges[-1])
+        ax.set_ylim(y_edges[0], y_edges[-1])
+        ax.set_autoscale_on(False)
 
         # Select contour with most vertices (longest)
         paths = pts.get_paths()
@@ -917,8 +1034,8 @@ class DataCollapse:
         }
 
         # Set optimal values
-        result[name1] = arr1[idx1]
-        result[name2] = arr2[idx2]
+        result[name1] = plot_arr1[idx1]
+        result[name2] = plot_arr2[idx2]
         for fname, fval in fixed_params.items():
             result[fname] = fval
 
