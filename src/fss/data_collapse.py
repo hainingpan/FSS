@@ -625,6 +625,8 @@ class DataCollapse:
         abs: bool = False,
         color_iter: Iterator[Any] | None = None,
         raw: bool = False,
+        plot_kind: str = "scatter",
+        plot_kwargs: dict[str, Any] | None = None,
         **kwargs,
     ) -> None:
         """Plot the data collapse results.
@@ -651,6 +653,11 @@ class DataCollapse:
             Custom color iterator for different system sizes.
         raw : bool, optional
             If True, plot raw (unscaled) data.
+        plot_kind : str, optional
+            The kind of plot to create. Options are 'scatter' (default) or 'line'.
+        plot_kwargs : dict[str, Any] | None, optional
+            Additional keyword arguments to pass to the plotting function
+            (ax.scatter or ax.plot).
         **kwargs
             Additional arguments passed to scatter/plot functions.
         """
@@ -663,6 +670,11 @@ class DataCollapse:
             else:
                 parts = [f"{label}={value:.3f}" for label, value, _ in params]
             return ",".join(parts)
+
+        if plot_kwargs is None:
+            plot_kwargs = {}
+        
+        final_plot_kwargs = {**plot_kwargs, **kwargs}
 
         if raw:
             x_i=self.p_i
@@ -702,25 +714,34 @@ class DataCollapse:
                         x=(self.p_i[start_idx:end_idx])
                     ax.errorbar(x, self.y_i[start_idx:end_idx], label=f'{L}', color=color, yerr=self.d_i[start_idx:end_idx], capsize=2, fmt='x',linestyle="None")
 
-                    ax.plot(x,self.y_i_fitted[start_idx:end_idx],label=f'{L}',color=color,**kwargs)
+                    ax.plot(x,self.y_i_fitted[start_idx:end_idx],label=f'{L}',color=color,**final_plot_kwargs)
                 else:
                     if abs:
                         x=np.abs(x_i[start_idx:end_idx])
                     else:
                         x=(x_i[start_idx:end_idx])
-                    ax.scatter(x,self.y_i_minus_irrelevant[start_idx:end_idx],label=f'{L}',color=color,**kwargs)
+                    if plot_kind == "line":
+                        ax.plot(x,self.y_i_minus_irrelevant[start_idx:end_idx],label=f'{L}',color=color,**final_plot_kwargs)
+                    else:
+                        ax.scatter(x,self.y_i_minus_irrelevant[start_idx:end_idx],label=f'{L}',color=color,**final_plot_kwargs)
                     if plot_irrelevant:
                         color_r=next(color_r_iter)
-                        ax2.scatter(x,self.y_i_irrelevant[start_idx:end_idx],label=f'{L}',color=color_r,**kwargs)
+                        if plot_kind == "line":
+                            ax2.plot(x,self.y_i_irrelevant[start_idx:end_idx],label=f'{L}',color=color_r,**final_plot_kwargs)
+                        else:
+                            ax2.scatter(x,self.y_i_irrelevant[start_idx:end_idx],label=f'{L}',color=color_r,**final_plot_kwargs)
             else:
                 if abs:
                     x=np.abs(x_i[start_idx:end_idx])
                 else:
                     x=x_i[start_idx:end_idx]
                 if errorbar:
-                    ax.errorbar(x,y_i[start_idx:end_idx],yerr=d_i[start_idx:end_idx],label=f'{L}',color=color,capsize=3,**kwargs)
+                    ax.errorbar(x,y_i[start_idx:end_idx],yerr=d_i[start_idx:end_idx],label=f'{L}',color=color,capsize=3,**final_plot_kwargs)
                 else:
-                    ax.scatter(x,y_i[start_idx:end_idx],label=f'{L}',color=color,**kwargs)
+                    if plot_kind == "line":
+                        ax.plot(x,y_i[start_idx:end_idx],label=f'{L}',color=color,**final_plot_kwargs)
+                    else:
+                        ax.scatter(x,y_i[start_idx:end_idx],label=f'{L}',color=color,**final_plot_kwargs)
         if raw:
             ax.set_ylabel(r"$y_i$")
         else:
