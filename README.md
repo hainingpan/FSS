@@ -178,13 +178,13 @@ so the mapping is direct.
 For a Berezinskii–Kosterlitz–Thouless (BKT) transition, the correlation length diverges exponentially rather than as a power law:
 
 $$
-\xi \sim \exp\!\left(a\,(p - p_c)^{-\sigma}\right)
+\xi \sim \exp\left(a\,(p - p_c)^{-\sigma}\right)
 $$
 
 The standard power-law finite-size scaling form no longer applies. Instead, the observable satisfies
 
 $$
-y(p, L) \sim L^{\Delta}\, f\!\left((p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}\right)
+y(p, L) \sim L^{\Delta}\, f\left((p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}\right)
 $$
 
 where:
