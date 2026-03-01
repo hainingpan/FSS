@@ -820,12 +820,14 @@ class DataCollapse:
         nu: np.ndarray | list[float] | float,
         beta: np.ndarray | list[float] | float = 0,
         p_c_range: tuple[float, float] | None = None,
-        nu_range: tuple[float, float] = (0., 10),
-        beta_range: tuple[float, float] = (0, 10),
+        nu_range: tuple[float, float] | None = None,
+        beta_range: tuple[float, float] | None = None,
         ax: Axes | None = None,
         colorbar_position: str = 'right',
         n_jobs: int = -1,
         backend: str = 'threading',
+        cmap: str = 'seismic',
+        log_chi2: bool = True,
     ) -> dict[str, Any]:
         """Sweep over two parameters to visualize reduced chi-squared landscape.
 
@@ -927,6 +929,20 @@ class DataCollapse:
         name1, arr1, label1 = sweep_params[0]
         name2, arr2, label2 = sweep_params[1]
 
+        # Auto-derive ranges from sweep arrays so lmfit doesn't clamp values
+        def _auto_range(val, default):
+            if isinstance(val, (list, np.ndarray)):
+                arr = np.asarray(val)
+                return (float(arr.min()), float(arr.max()))
+            return default
+
+        if p_c_range is None:
+            p_c_range = _auto_range(p_c, (0, 1))
+        if nu_range is None:
+            nu_range = _auto_range(nu, (0., 10))
+        if beta_range is None:
+            beta_range = _auto_range(beta, (0, 10))
+
         # Define chi2 computation function
         def compute_chi2(i, j):
             params = dict(fixed_params)
@@ -936,7 +952,7 @@ class DataCollapse:
                 res = self.datacollapse(
                     p_c=params['p_c'], nu=params['nu'], beta=params['beta'],
                     p_c_vary=False, nu_vary=False, beta_vary=False,
-                    p_c_range=p_c_range if p_c_range else (0, 1),
+                    p_c_range=p_c_range,
                     nu_range=nu_range, beta_range=beta_range,
                 )
                 return i, j, res.redchi
@@ -991,8 +1007,8 @@ class DataCollapse:
 
         # Plot pcolormesh
         im = ax.pcolormesh(
-            plot_arr2, plot_arr1, np.log(plot_grid),
-            cmap='seismic',
+            plot_arr2, plot_arr1, np.log(plot_grid) if log_chi2 else plot_grid,
+            cmap=cmap,
             shading='auto',
             # vmax=np.log(2.6 * np.nanmin(chi2_grid))
         )
@@ -1007,13 +1023,14 @@ class DataCollapse:
         ax.set_xlabel(_format_token(label2))
 
         # Add colorbar
+        cb_label = r'$\log(\chi_\nu^2)$' if log_chi2 else r'$\chi_\nu^2$'
         if colorbar_position == 'right':
-            plt.colorbar(im, ax=ax, label=r'$\log(\chi_\nu^2)$')
+            plt.colorbar(im, ax=ax, label=cb_label)
         elif colorbar_position == 'top':
             axins = ax.inset_axes([0.4, 1.02, 0.6, 0.05])
             plt.colorbar(im, cax=axins, label='', orientation='horizontal')
             axins.xaxis.tick_top()
-            axins.text(0.4, 1.02, r'$\log(\chi_\nu^2)$', ha='right', va='bottom', transform=ax.transAxes)
+            axins.text(0.4, 1.02, cb_label, ha='right', va='bottom', transform=ax.transAxes)
 
         # Find minimum and plot marker
         idx1, idx2 = np.unravel_index(np.nanargmin(plot_grid), plot_grid.shape)
