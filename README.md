@@ -178,13 +178,13 @@ so the mapping is direct.
 For a Berezinskii–Kosterlitz–Thouless (BKT) transition, the correlation length diverges exponentially rather than as a power law:
 
 $$
-\xi \sim \exp\left(a\,(p - p_c)^{-\sigma}\right)
+\xi \sim \exp\left(a(p - p_c)^{-\sigma}\right)
 $$
 
 The standard power-law finite-size scaling form no longer applies. Instead, the observable satisfies
 
 $$
-y(p, L) \sim L^{\Delta}\, f\left((p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}\right)
+y(p, L) \sim L^{\Delta} f\left((p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}\right)
 $$
 
 where:
@@ -196,7 +196,7 @@ where:
 The collapse rescales
 
 $$
-x = (p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}, \quad y_{\text{scaled}} = y\, L^{-\Delta}
+x = (p - p_c)\left(\log \frac{L}{L_0}\right)^{1/\sigma}, \quad y_{\text{scaled}} = y L^{-\Delta}
 $$
 
 and optimizes $p_c, \sigma, L_0, \Delta$ so that $y_{\text{scaled}}$ falls on a single curve $f(x)$.
@@ -220,8 +220,8 @@ where:
 - $a_{j_1 j_2}$: Taylor coefficients (fitted via generalized least squares)
 
 The observable decomposes into:
-- **Relevant part** (universal scaling function): $f(x) = \sum_{j_1=0}^{n_1} a_{j_1, 0} \, x^{j_1}$
-- **Irrelevant part** (corrections): $\sum_{j_1, j_2 > 0} a_{j_1 j_2} \, x^{j_1} L^{-y j_2}$
+- **Relevant part** (universal scaling function): $f(x) = \sum_{j_1=0}^{n_1} a_{j_1, 0}  x^{j_1}$
+- **Irrelevant part** (corrections): $\sum_{j_1, j_2 > 0} a_{j_1 j_2}  x^{j_1} L^{-y j_2}$
 
 Nonlinear parameters $(p_c, \nu, y)$ are optimized via `lmfit`; linear coefficients $a_{j_1 j_2}$ are solved analytically by Generalized Least Squares.
 
