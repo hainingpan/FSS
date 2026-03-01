@@ -186,6 +186,33 @@ class DataCollapse:
         return L_i,p_i,d_i,y_i   
 
     
+    def _smoothness_residuals(self, x_i, y_scaled, d_scaled):
+        ind=np.argsort(x_i)
+        x_i=x_i[ind]
+        y_scaled=y_scaled[ind]
+        d_scaled=d_scaled[ind]
+        x={i:x_i[1+i:x_i.shape[0]-1+i] for i in [-1,0,1]}
+        d={i:d_scaled[1+i:d_scaled.shape[0]-1+i] for i in [-1,0,1]}
+        y={i:y_scaled[1+i:y_scaled.shape[0]-1+i] for i in [-1,0,1]}
+        x_post_ratio=(x[1]-x[0])/(x[1]-x[-1])
+        x_pre_ratio=(x[-1]-x[0])/(x[1]-x[-1])
+        y_var=d[0]**2+(x_post_ratio*d[-1])**2+(x_pre_ratio*d[1])**2
+        y_var=np.clip(y_var,y_var[y_var>0].min(),None)
+        y_bar=x_post_ratio*y[-1]-x_pre_ratio*y[1]
+        return (y[0]-y_bar)/np.sqrt(y_var)
+
+    def _gls_solve(self, x_i, y_scaled, d_scaled, ir_i, n1, n2):
+        j1,j2=np.meshgrid(np.arange(n1+1),np.arange(n2+1),indexing='ij')
+        self.X=(x_i**j1.flatten()[:,np.newaxis] * ir_i**j2.flatten()[:,np.newaxis]).T
+        Sigma_inv=np.diag(1/d_scaled**2)
+        XX=self.X.T@ Sigma_inv @ self.X
+        XY=self.X.T@ Sigma_inv @ y_scaled
+        self.coeffs=np.linalg.inv(XX)@XY
+        self.y_i_scaled=y_scaled
+        self.d_i_scaled=d_scaled
+        self.y_i_fitted=self.X @ self.coeffs
+        return (self.y_i_scaled-self.y_i_fitted)/self.d_i_scaled
+
     def loss(self, p_c: float, nu: float, beta: float = 0) -> np.ndarray:
         """Compute smoothness-based residuals for data collapse.
 
@@ -207,20 +234,9 @@ class DataCollapse:
             Normalized residuals measuring deviation from smooth collapse.
         """
         x_i=(self.p_i-p_c)*(self.L_i)**(1/nu)
-        order=x_i.argsort()
-        x_i_ordered=x_i[order]
-        y_i_ordered=self.y_i[order] * self.L_i[order]**(beta/nu)
-        d_i_ordered=self.d_i[order] * self.L_i[order]**(beta/nu)
-        x={i:x_i_ordered[1+i:x_i_ordered.shape[0]-1+i] for i in [-1,0,1]}
-        d={i:d_i_ordered[1+i:d_i_ordered.shape[0]-1+i] for i in [-1,0,1]}
-        y={i:y_i_ordered[1+i:y_i_ordered.shape[0]-1+i] for i in [-1,0,1]}
-        x_post_ratio=(x[1]-x[0])/(x[1]-x[-1])
-        x_pre_ratio=(x[-1]-x[0])/(x[1]-x[-1])
-        y_var=d[0]**2+(x_post_ratio*d[-1])**2+(x_pre_ratio*d[1])**2
-        y_var=np.clip(y_var,y_var[y_var>0].min(),None)
-        y_bar=x_post_ratio*y[-1]-x_pre_ratio*y[1]
-        # return y[0],y_bar,y_var
-        return (y[0]-y_bar)/np.sqrt(y_var)
+        y_scaled=self.y_i * self.L_i**(beta/nu)
+        d_scaled=self.d_i * self.L_i**(beta/nu)
+        return self._smoothness_residuals(x_i, y_scaled, d_scaled)
 
     def loss_with_drift(
         self,
@@ -347,6 +363,8 @@ class DataCollapse:
         self.nu=res.params['nu'].value
         self.beta=res.params['beta'].value
         self.res=res
+        self.x_i=(self.p_i-self.p_c)*(self.L_i)**(1/self.nu)
+        self._fit_type='powerlaw'
         return res
 
     def datacollapse_with_drift(
@@ -503,20 +521,10 @@ class DataCollapse:
             Normalized residuals (y_scaled - y_fitted) / d_scaled.
         """
         x_i=(self.p_i-p_c)*(self.L_i)**(1/nu)
-        ir_i=self.L_i**(-y) # irrelevant scaling
-        j1,j2=np.meshgrid(np.arange(n1+1),np.arange(n2+1),indexing='ij')
-        self.X=(x_i**j1.flatten()[:,np.newaxis] * ir_i**j2.flatten()[:,np.newaxis]).T
-        # Scale observable by L^{beta/nu} to get the universal scaling function
+        ir_i=self.L_i**(-y)
         Y=self.y_i * self.L_i**(beta/nu)
         d_scaled=self.d_i * self.L_i**(beta/nu)
-        Sigma_inv=np.diag(1/d_scaled**2)
-        XX=self.X.T@ Sigma_inv @ self.X
-        XY=self.X.T@ Sigma_inv @ Y
-        self.coeffs=np.linalg.inv(XX)@XY
-        self.y_i_scaled=Y  # scaled observable
-        self.d_i_scaled=d_scaled
-        self.y_i_fitted=self.X @ self.coeffs
-        return (self.y_i_scaled-self.y_i_fitted)/self.d_i_scaled
+        return self._gls_solve(x_i, Y, d_scaled, ir_i, n1, n2)
 
     
     def datacollapse_with_drift_GLS(
@@ -610,6 +618,220 @@ class DataCollapse:
         else:
             self.y_i_minus_irrelevant=self.y_i_scaled
             self.y_i_irrelevant=0
+        self._fit_type='powerlaw'
+        return res
+
+    def loss_bkt(self, p_c, L_0, sigma, delta=0):
+        """BKT scaling residuals: O ~ L^delta * f((p-p_c) * (log(L/L_0))^{1/sigma})"""
+        if np.any(self.L_i <= L_0):
+            raise ValueError(f'L_0={L_0} must be less than all system sizes L_i (min={np.min(self.L_i)})')
+        x_i = (self.p_i - p_c) * (np.log(self.L_i / L_0))**(1/sigma)
+        y_scaled = self.y_i * self.L_i**(-delta)
+        d_scaled = self.d_i * self.L_i**(-delta)
+        return self._smoothness_residuals(x_i, y_scaled, d_scaled)
+
+    def datacollapse_bkt(
+        self,
+        p_c: float | None = None,
+        L_0: float | None = None,
+        sigma: float | None = None,
+        delta: float = 0,
+        p_c_vary: bool = True,
+        L_0_vary: bool = True,
+        sigma_vary: bool = True,
+        delta_vary: bool = False,
+        p_c_range: tuple[float, float] = (0, 1),
+        L_0_range: tuple[float, float] | None = None,
+        sigma_range: tuple[float, float] = (0.1, 5),
+        delta_range: tuple[float, float] = (-2, 2),
+        **kwargs,
+    ) -> MinimizerResult:
+        """Perform BKT data collapse optimization without irrelevant corrections.
+
+        Fits critical parameters (p_c, L_0, sigma, delta) by minimizing deviations
+        from a smooth universal scaling curve. The BKT scaling form is:
+        y * L^{-delta} = f((p - p_c) * (log(L/L_0))^{1/sigma})
+
+        Parameters
+        ----------
+        p_c : float | None, optional
+            Initial guess for critical point.
+        L_0 : float | None, optional
+            Initial guess for the BKT length scale.
+        sigma : float | None, optional
+            Initial guess for the BKT exponent.
+        delta : float, optional
+            Initial guess for the scaling exponent of y, by default 0.
+        p_c_vary : bool, optional
+            Whether to fit p_c, by default True.
+        L_0_vary : bool, optional
+            Whether to fit L_0, by default True.
+        sigma_vary : bool, optional
+            Whether to fit sigma, by default True.
+        delta_vary : bool, optional
+            Whether to fit delta, by default False.
+        p_c_range : tuple[float, float], optional
+            Bounds (min, max) for p_c, by default (0, 1).
+        L_0_range : tuple[float, float] | None, optional
+            Bounds (min, max) for L_0. If None, auto-computed as (0.01, min(L_i)-eps).
+        sigma_range : tuple[float, float], optional
+            Bounds (min, max) for sigma, by default (0.1, 5).
+        delta_range : tuple[float, float], optional
+            Bounds (min, max) for delta, by default (-2, 2).
+        **kwargs
+            Additional arguments passed to `lmfit.minimize()`.
+
+        Returns
+        -------
+        MinimizerResult
+            The lmfit optimization result. Fitted values are also stored as
+            `self.p_c`, `self.L_0`, `self.sigma`, `self.delta`, and `self.res`.
+        """
+        from lmfit import minimize, Parameters
+
+        if L_0_range is None:
+            L_0_range = (0.01, float(np.min(self.L_i) - 1e-6))
+
+        params=Parameters()
+        params.add('p_c',value=p_c,min=p_c_range[0],max=p_c_range[1],vary=p_c_vary)
+        params.add('L_0',value=L_0,min=L_0_range[0],max=L_0_range[1],vary=L_0_vary)
+        params.add('sigma',value=sigma,min=sigma_range[0],max=sigma_range[1],vary=sigma_vary)
+        params.add('delta',value=delta,min=delta_range[0],max=delta_range[1],vary=delta_vary)
+
+        def residual(params):
+            r = self.loss_bkt(params['p_c'],params['L_0'],params['sigma'],params['delta'])
+            return r[np.isfinite(r)]
+
+        res=minimize(residual,params,**kwargs)
+        self.p_c=res.params['p_c'].value
+        self.L_0=res.params['L_0'].value
+        self.sigma=res.params['sigma'].value
+        self.delta=res.params['delta'].value
+        self.res=res
+        self.x_i=(self.p_i-self.p_c)*(np.log(self.L_i/self.L_0))**(1/self.sigma)
+        self._fit_type='bkt'
+        return res
+
+    def loss_bkt_with_drift_GLS(self, p_c, L_0, sigma, y, n1, n2, delta=0):
+        """BKT scaling GLS residuals with irrelevant corrections.
+
+        Note: BKT GLS is experimental and not yet verified against analytical results.
+        """
+        if np.any(self.L_i <= L_0):
+            raise ValueError(f'L_0={L_0} must be less than all system sizes L_i (min={np.min(self.L_i)})')
+        x_i = (self.p_i - p_c) * (np.log(self.L_i / L_0))**(1/sigma)
+        ir_i = self.L_i**(-y)
+        Y = self.y_i * self.L_i**(-delta)
+        d_scaled = self.d_i * self.L_i**(-delta)
+        return self._gls_solve(x_i, Y, d_scaled, ir_i, n1, n2)
+
+    def datacollapse_bkt_with_drift_GLS(
+        self,
+        n1: int,
+        n2: int,
+        p_c: float | None = None,
+        L_0: float | None = None,
+        sigma: float | None = None,
+        y: float | None = None,
+        delta: float = 0,
+        p_c_vary: bool = True,
+        L_0_vary: bool = True,
+        sigma_vary: bool = True,
+        y_vary: bool = True,
+        delta_vary: bool = False,
+        p_c_range: tuple[float, float] = (0, 1),
+        L_0_range: tuple[float, float] | None = None,
+        sigma_range: tuple[float, float] = (0.1, 5),
+        y_range: tuple[float, float] = (0, 5),
+        delta_range: tuple[float, float] = (-2, 2),
+        **kwargs,
+    ) -> MinimizerResult:
+        """BKT data collapse with GLS fitting.
+
+        Note: BKT GLS is experimental and not yet verified against analytical results.
+
+        Fits critical parameters (p_c, L_0, sigma, y, delta) while using generalized
+        least squares to solve for optimal polynomial coefficients. The BKT scaling
+        form with irrelevant corrections is:
+        y(p, L) * L^{-delta} = sum_{j1,j2} a_{j1,j2} * x^{j1} * L^{-y*j2}
+        where x = (p - p_c) * (log(L/L_0))^{1/sigma}
+
+        Parameters
+        ----------
+        n1 : int
+            Maximum power of the relevant scaling variable x.
+        n2 : int
+            Maximum power of the irrelevant scaling variable L^{-y}.
+        p_c : float | None, optional
+            Initial guess for critical point.
+        L_0 : float | None, optional
+            Initial guess for the BKT length scale.
+        sigma : float | None, optional
+            Initial guess for the BKT exponent.
+        y : float | None, optional
+            Initial guess for irrelevant scaling exponent.
+        delta : float, optional
+            Initial guess for the scaling exponent of y, by default 0.
+        p_c_vary : bool, optional
+            Whether to fit p_c, by default True.
+        L_0_vary : bool, optional
+            Whether to fit L_0, by default True.
+        sigma_vary : bool, optional
+            Whether to fit sigma, by default True.
+        y_vary : bool, optional
+            Whether to fit y, by default True.
+        delta_vary : bool, optional
+            Whether to fit delta, by default False.
+        p_c_range : tuple[float, float], optional
+            Bounds (min, max) for p_c, by default (0, 1).
+        L_0_range : tuple[float, float] | None, optional
+            Bounds (min, max) for L_0. If None, auto-computed as (0.01, min(L_i)-eps).
+        sigma_range : tuple[float, float], optional
+            Bounds (min, max) for sigma, by default (0.1, 5).
+        y_range : tuple[float, float], optional
+            Bounds (min, max) for y, by default (0, 5).
+        delta_range : tuple[float, float], optional
+            Bounds (min, max) for delta, by default (-2, 2).
+        **kwargs
+            Additional arguments passed to `lmfit.minimize()`.
+
+        Returns
+        -------
+        MinimizerResult
+            The lmfit optimization result. Fitted values and polynomial
+            coefficients stored as attributes.
+        """
+        from lmfit import minimize, Parameters
+
+        if L_0_range is None:
+            L_0_range = (0.01, float(np.min(self.L_i) - 1e-6))
+
+        params=Parameters()
+        params.add('p_c',value=p_c,min=p_c_range[0],max=p_c_range[1],vary=p_c_vary)
+        params.add('L_0',value=L_0,min=L_0_range[0],max=L_0_range[1],vary=L_0_vary)
+        params.add('sigma',value=sigma,min=sigma_range[0],max=sigma_range[1],vary=sigma_vary)
+        params.add('y',value=y,min=y_range[0],max=y_range[1],vary=y_vary)
+        params.add('delta',value=delta,min=delta_range[0],max=delta_range[1],vary=delta_vary)
+
+        def residual(params):
+            r = self.loss_bkt_with_drift_GLS(params['p_c'],params['L_0'],params['sigma'],params['y'],n1,n2,params['delta'])
+            return r[np.isfinite(r)]
+
+        res=minimize(residual,params,**kwargs)
+        self.p_c=res.params['p_c'].value
+        self.L_0=res.params['L_0'].value
+        self.sigma=res.params['sigma'].value
+        self.y=res.params['y'].value
+        self.delta=res.params['delta'].value
+        self.res=res
+        self.x_i=(self.p_i-self.p_c)*(np.log(self.L_i/self.L_0))**(1/self.sigma)
+        if n2>0:
+            self.y_i_minus_irrelevant=self.y_i_scaled - self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.coeffs.reshape((n1+1,n2+1))[:,1:].flatten()
+            self.y_i_irrelevant=self.X.reshape((-1,n1+1,n2+1))[:,:,1:].reshape((-1,(n1+1)*n2))@self.coeffs.reshape((n1+1,n2+1))[:,1:].flatten()
+        else:
+            self.y_i_minus_irrelevant=self.y_i_scaled
+            self.y_i_irrelevant=0
+        self._fit_type='bkt'
         return res
         
 
@@ -681,9 +903,14 @@ class DataCollapse:
             y_i=self.y_i
             d_i=self.d_i
         else:
-            x_i=(self.p_i-self.p_c)*(self.L_i)**(1/self.nu)
-            y_i= self.y_i*self.L_i**(self.beta/self.nu)
-            d_i = self.d_i * self.L_i**(self.beta/self.nu)
+            if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                x_i = self.x_i
+                y_i = self.y_i * self.L_i**(-self.delta)
+                d_i = self.d_i * self.L_i**(-self.delta)
+            else:
+                x_i=(self.p_i-self.p_c)*(self.L_i)**(1/self.nu)
+                y_i= self.y_i*self.L_i**(self.beta/self.nu)
+                d_i = self.d_i * self.L_i**(self.beta/self.nu)
         # x_i=self.p_i
         if ax is None:
             fig,ax = plt.subplots()
@@ -696,7 +923,10 @@ class DataCollapse:
         color_r_iter = iter(plt.cm.Reds(0.4+0.6*(i/L_list.shape[0])) for i in range(L_list.shape[0]))
         if drift and driftcollapse and plot_irrelevant:
             ax2=ax.twinx()
-            l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+            if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                l_label, l_is_math = _format_exponent(self.L_, r"-\Delta")
+            else:
+                l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
             if hasattr(self, "y_i_scaled"):
                 if l_is_math:
                     ax2.set_ylabel(rf"$y_{{irre}} {l_label}$")
@@ -745,7 +975,10 @@ class DataCollapse:
         if raw:
             ax.set_ylabel(r"$y_i$")
         else:
-            l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+            if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                l_label, l_is_math = _format_exponent(self.L_, r"-\Delta")
+            else:
+                l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
             if l_is_math:
                 ax.set_ylabel(rf"$y_i {l_label}$")
             else:
@@ -757,28 +990,57 @@ class DataCollapse:
                 if not driftcollapse:
                     ax.set_xlabel(_append_subscript(self.p_, "i"))
                     ax.set_ylabel(r"$y_i$")
-                    ax.set_title(
-                        _title_from_params(
-                            [
-                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
-                                (r"$\nu$", self.nu, self.res.params["nu"].stderr),
-                                (r"$y$", self.y, self.res.params["y"].stderr),
-                            ]
+                    if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                        ax.set_title(
+                            _title_from_params(
+                                [
+                                    (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                    (r"$\sigma$", self.sigma, self.res.params["sigma"].stderr),
+                                    (r"$\Delta$", self.delta, self.res.params["delta"].stderr),
+                                    (r"$L_0$", self.L_0, self.res.params["L_0"].stderr),
+                                    (r"$y$", self.y, self.res.params["y"].stderr),
+                                ]
+                            )
                         )
-                    )
+                    else:
+                        ax.set_title(
+                            _title_from_params(
+                                [
+                                    (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                    (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                                    (r"$y$", self.y, self.res.params["y"].stderr),
+                                ]
+                            )
+                        )
 
                 else:
                     ax.set_xlabel(r'$x_i$')
-                    ax.set_title(
-                        _title_from_params(
-                            [
-                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
-                                (r"$\nu$", self.nu, self.res.params["nu"].stderr),
-                                (r"$y$", self.y, self.res.params["y"].stderr),
-                            ]
+                    if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                        ax.set_title(
+                            _title_from_params(
+                                [
+                                    (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                    (r"$\sigma$", self.sigma, self.res.params["sigma"].stderr),
+                                    (r"$\Delta$", self.delta, self.res.params["delta"].stderr),
+                                    (r"$L_0$", self.L_0, self.res.params["L_0"].stderr),
+                                    (r"$y$", self.y, self.res.params["y"].stderr),
+                                ]
+                            )
                         )
-                    )
-                    l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
+                    else:
+                        ax.set_title(
+                            _title_from_params(
+                                [
+                                    (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                    (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                                    (r"$y$", self.y, self.res.params["y"].stderr),
+                                ]
+                            )
+                        )
+                    if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                        l_label, l_is_math = _format_exponent(self.L_, r"-\Delta")
+                    else:
+                        l_label, l_is_math = _format_exponent(self.L_, r"\beta/\nu")
                     if hasattr(self, "y_i_scaled"):
                         if l_is_math:
                             ax.set_ylabel(rf"$(y_i - y_{{irre}}) {l_label}$")
@@ -787,26 +1049,40 @@ class DataCollapse:
                     else:
                         ax.set_ylabel(r"$y_i - y_{irre}$")
             else:
-                l_label, l_is_math = _format_exponent(self.L_, r"1/\nu")
-                l_label = _wrap_math(l_label, l_is_math)
-                if abs:
-                    ax.set_xlabel(
-                        f"|{_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}| {l_label}"
+                if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
+                    l_token, _ = _strip_math_delimiters(self.L_)
+                    ax.set_xlabel(r'$(p_i - p_c) (\log(' + l_token + r'/L_0))^{1/\sigma}$')
+                    ax.set_title(
+                        _title_from_params(
+                            [
+                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                (r"$\sigma$", self.sigma, self.res.params["sigma"].stderr),
+                                (r"$\Delta$", self.delta, self.res.params["delta"].stderr),
+                                (r"$L_0$", self.L_0, self.res.params["L_0"].stderr),
+                            ]
+                        )
                     )
                 else:
-                    ax.set_xlabel(
-                        f"({_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}) {l_label}"
+                    l_label, l_is_math = _format_exponent(self.L_, r"1/\nu")
+                    l_label = _wrap_math(l_label, l_is_math)
+                    if abs:
+                        ax.set_xlabel(
+                            f"|{_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}| {l_label}"
+                        )
+                    else:
+                        ax.set_xlabel(
+                            f"({_append_subscript(self.p_, 'i')}-{_append_subscript(self.p_, 'c')}) {l_label}"
+                        )
+                    # ax.set_title(rf'$p_c={self.p_c:.3f},\nu={self.nu:.3f}$')
+                    ax.set_title(
+                        _title_from_params(
+                            [
+                                (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
+                                (r"$\nu$", self.nu, self.res.params["nu"].stderr),
+                                (r"$\beta$", self.beta, self.res.params["beta"].stderr),
+                            ]
+                        )
                     )
-                # ax.set_title(rf'$p_c={self.p_c:.3f},\nu={self.nu:.3f}$')
-                ax.set_title(
-                    _title_from_params(
-                        [
-                            (_append_subscript(self.p_, "c"), self.p_c, self.res.params["p_c"].stderr),
-                            (r"$\nu$", self.nu, self.res.params["nu"].stderr),
-                            (r"$\beta$", self.beta, self.res.params["beta"].stderr),
-                        ]
-                    )
-                )
 
         ax.legend()
         ax.grid('on')

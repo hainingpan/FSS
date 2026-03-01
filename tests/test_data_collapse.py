@@ -223,3 +223,84 @@ def test_plot_data_collapse_title_pm_and_text_p():
     title = ax.get_title()
     assert r"\pm" not in title
     plt.close(fig)
+
+
+def generate_bkt_data(p_c=0.892, L_0=1.2, delta=-0.25, c=2.0, sigma=0.5,
+                      L_vals=np.array([16, 32, 64, 128, 256]),
+                      p_vals=np.linspace(0.8, 0.98, 19),
+                      add_noise=False, noise_level=0.01, N=100, seed=0):
+    rng = np.random.default_rng(seed)
+    data = {}
+    for L in L_vals:
+        for p in p_vals:
+            x = (p - p_c) * (np.log(L / L_0))**(1/sigma)
+            f_x = 1.0 / (1.0 + np.exp(c * x))
+            O = (L**delta) * f_x
+            if add_noise:
+                data[(p, L)] = O + rng.normal(0, noise_level * abs(O), N)
+            else:
+                data[(p, L)] = np.full(N, O) + rng.normal(0, 1e-10, N)
+    index = pd.MultiIndex.from_tuples(list(data.keys()), names=['p', 'L'])
+    return pd.DataFrame({'observations': list(data.values())}, index=index)
+
+
+def test_datacollapse_bkt():
+    df = generate_bkt_data(add_noise=True, noise_level=0.005)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.85, 0.94])
+    res = dc.datacollapse_bkt(p_c=0.9, L_0=1.0, sigma=0.5, delta=-0.2,
+                               p_c_range=(0.85, 0.95), delta_vary=True)
+    assert abs(res.params['p_c'].value - 0.892) < 0.05
+    assert abs(res.params['sigma'].value - 0.5) < 0.3
+    assert abs(res.params['delta'].value - (-0.25)) < 0.3
+    assert abs(res.params['L_0'].value - 1.2) < 1.0
+    assert dc._fit_type == 'bkt'
+
+
+def test_datacollapse_bkt_with_drift_GLS():
+    df = generate_bkt_data(add_noise=True, noise_level=0.005)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.85, 0.94])
+    res = dc.datacollapse_bkt_with_drift_GLS(n1=2, n2=0, p_c=0.9, L_0=1.0, sigma=0.5,
+                                              p_c_range=(0.85, 0.95), delta=-0.2, delta_vary=True)
+    assert np.all(np.isfinite(res.residual))
+    assert hasattr(dc, 'coeffs')
+    assert hasattr(dc, 'y_i_minus_irrelevant')
+    assert abs(res.params['p_c'].value - 0.892) < 0.1
+    assert dc._fit_type == 'bkt'
+
+
+def test_plot_data_collapse_bkt_labels():
+    df = generate_bkt_data(add_noise=True, noise_level=0.005)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.85, 0.94])
+    dc.datacollapse_bkt(p_c=0.9, L_0=1.0, sigma=0.5, delta=-0.2,
+                         p_c_range=(0.85, 0.95), delta_vary=True)
+    fig, ax = plt.subplots()
+    dc.plot_data_collapse(ax=ax)
+    xlabel = ax.get_xlabel()
+    ylabel = ax.get_ylabel()
+    title = ax.get_title()
+    assert 'log' in xlabel or r'\log' in xlabel or r'\sigma' in xlabel
+    assert r'\Delta' in ylabel or 'Delta' in ylabel
+    assert r'\sigma' in title or 'sigma' in title or 'L_0' in title
+    plt.close(fig)
+
+
+def test_datacollapse_bkt_L0_safety():
+    df = generate_pseudo_data()
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
+    with pytest.raises(ValueError, match='L_0'):
+        dc.loss_bkt(p_c=0.5, L_0=300.0, sigma=0.5, delta=0.0)
+
+
+def test_fit_type_flag():
+    # Power-law sets 'powerlaw'
+    df = generate_pseudo_data(pc=0.5, nu=1.0, beta=0.5)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
+    dc.datacollapse(p_c=0.505, nu=1.3, beta=0.0, p_c_vary=True, nu_vary=True, beta_vary=True)
+    assert dc._fit_type == 'powerlaw'
+
+    # BKT sets 'bkt'
+    df_bkt = generate_bkt_data(add_noise=True, noise_level=0.005)
+    dc_bkt = DataCollapse(df_bkt, p_='p', L_='L', params={}, p_range=[0.85, 0.94])
+    dc_bkt.datacollapse_bkt(p_c=0.9, L_0=1.0, sigma=0.5, delta=-0.2,
+                             p_c_range=(0.85, 0.95), delta_vary=True)
+    assert dc_bkt._fit_type == 'bkt'
