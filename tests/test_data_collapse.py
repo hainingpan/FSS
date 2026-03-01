@@ -8,7 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from fss import DataCollapse
-from fss.data_collapse import _append_subscript, _format_token
+from fss.data_collapse import _append_subscript, _format_token, _math_safe
 
 
 def generate_pseudo_data(pc=0.5, p_list=np.round(np.linspace(0.45, 0.55, 11), 2),
@@ -152,6 +152,20 @@ def test_format_token_exponent_text():
     assert f"{formatted}$^{{\\beta/\\nu}}$" == "eval_dropout_rate$^{\\beta/\\nu}$"
 
 
+def test_math_safe_simple_tokens():
+    """Simple math tokens (single letter, LaTeX, subscript) pass through unchanged."""
+    assert _math_safe("p") == "p"
+    assert _math_safe("L") == "L"
+    assert _math_safe("a_i") == "a_i"
+    assert _math_safe("$\\nu$") == "\\nu"
+
+
+def test_math_safe_text_tokens():
+    """Multi-underscore tokens are wrapped in \\mathrm{} with escaped underscores."""
+    assert _math_safe("train_size") == r"\mathrm{train\_size}"
+    assert _math_safe("eval_dropout_rate") == r"\mathrm{eval\_dropout\_rate}"
+    assert _math_safe("$train_size$") == r"\mathrm{train\_size}"
+
 def test_plot_data_collapse_drift_labels_math_L():
     df = generate_drift_data()
     dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
@@ -281,6 +295,22 @@ def test_plot_data_collapse_bkt_labels():
     assert 'log' in xlabel or r'\log' in xlabel or r'\sigma' in xlabel
     assert r'\Delta' in ylabel or 'Delta' in ylabel
     assert r'\sigma' in title or 'sigma' in title or 'L_0' in title
+    plt.close(fig)
+
+def test_plot_data_collapse_bkt_labels_text_columns():
+    """BKT xlabel must not break when column names contain underscores."""
+    df = generate_bkt_data(add_noise=True, noise_level=0.005)
+    df.index.names = ['train_size', 'batch_size']
+    dc = DataCollapse(df, p_='train_size', L_='batch_size', params={}, p_range=[0.85, 0.94])
+    dc.datacollapse_bkt(p_c=0.9, L_0=1.0, sigma=0.5, delta=-0.2,
+                         p_c_range=(0.85, 0.95), delta_vary=True)
+    fig, ax = plt.subplots()
+    dc.plot_data_collapse(ax=ax)
+    xlabel = ax.get_xlabel()
+    # Underscores in user tokens must be escaped (not bare _ inside $...$)
+    assert r'\_' in xlabel or r'\mathrm' in xlabel
+    # The log/sigma structure is still present
+    assert r'\log' in xlabel or 'log' in xlabel
     plt.close(fig)
 
 

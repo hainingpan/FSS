@@ -56,6 +56,20 @@ def _format_exponent(token: str, exponent: str) -> tuple[str, bool]:
         return f"{formatted}^{{{exponent}}}", True
     return f"{formatted}$^{{{exponent}}}$", False
 
+
+def _math_safe(token: str) -> str:
+    """Make a user token safe for embedding inside a $...$ math expression.
+
+    Simple math tokens (single letter, LaTeX commands, single subscript) are
+    returned unchanged.  Anything else (e.g. ``train_size``) is wrapped in
+    ``\\mathrm{...}`` with underscores replaced by ``\\_`` so that LaTeX
+    does not interpret them as subscript operators.
+    """
+    raw, _ = _strip_math_delimiters(token)
+    if _is_simple_math_token(raw):
+        return raw
+    return r'\mathrm{' + raw.replace('_', r'\_') + '}'
+
 class DataCollapse:
     """Finite-size scaling data collapse analysis using lmfit optimization."""
 
@@ -1050,8 +1064,9 @@ class DataCollapse:
                         ax.set_ylabel(r"$y_i - y_{irre}$")
             else:
                 if getattr(self, '_fit_type', 'powerlaw') == 'bkt':
-                    l_token, _ = _strip_math_delimiters(self.L_)
-                    ax.set_xlabel(r'$(p_i - p_c) (\log(' + l_token + r'/L_0))^{1/\sigma}$')
+                    p_safe = _math_safe(self.p_)
+                    l_safe = _math_safe(self.L_)
+                    ax.set_xlabel(r'$(' + p_safe + r'_i - ' + p_safe + r'_c) (\log(' + l_safe + r'/L_0))^{1/\sigma}$')
                     ax.set_title(
                         _title_from_params(
                             [
