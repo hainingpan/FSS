@@ -28,20 +28,20 @@ Minimal, lmfit‑backed wrapper for estimating critical parameters via finite‑
 ## Install
 With `pip`:
 ```bash
-pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+pip install git+https://github.com/hainingpan/FSS.git
 ```
 With `uv`:
 ```bash
-uv pip install git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+uv pip install git+https://github.com/hainingpan/FSS.git
 ```
 
 To update to the latest version, with `pip`, use `-U`:
 ```bash
-pip install -U git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+pip install -U git+https://github.com/hainingpan/FSS.git
 ```
 With `uv`:
 ```bash
-uv pip install -U git+https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+uv pip install -U git+https://github.com/hainingpan/FSS.git
 ```
 
 The wheel/SDist metadata declares all runtime dependencies (numpy, pandas, matplotlib, lmfit, tqdm).
@@ -463,7 +463,7 @@ Contributions are welcome.
 ### Development Setup
 For local development, clone the repo and install with dev dependencies:
 ```bash
-git clone https://github.com/Pixley-Research-Group-in-CMT/FSS.git
+git clone https://github.com/hainingpan/FSS.git
 cd FSS
 pip install -e ".[dev]"
 ```
@@ -496,7 +496,7 @@ If you use this package in your research, please cite:
   year         = {2025},
   publisher    = {GitHub},
   journal      = {GitHub repository},
-  url          = {https://github.com/Pixley-Research-Group-in-CMT/FSS},
+  url          = {https://github.com/hainingpan/FSS},
   version      = {0.0.6}
 }
 ```

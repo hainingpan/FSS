@@ -28,5 +28,5 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.urls]
-Homepage = "https://github.com/Pixley-Research-Group-in-CMT/FSS.git"
-Repository = "https://github.com/Pixley-Research-Group-in-CMT/FSS.git"
+Homepage = "https://github.com/hainingpan/FSS.git"
+Repository = "https://github.com/hainingpan/FSS.git"
