@@ -304,3 +304,21 @@ def test_fit_type_flag():
     dc_bkt.datacollapse_bkt(p_c=0.9, L_0=1.0, sigma=0.5, delta=-0.2,
                              p_c_range=(0.85, 0.95), delta_vary=True)
     assert dc_bkt._fit_type == 'bkt'
+
+
+
+def test_parameter_sweep_bkt():
+    """Test parameter_sweep_bkt finds correct BKT parameters."""
+    df = generate_bkt_data(add_noise=True, noise_level=0.005)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.85, 0.94])
+    result = dc.parameter_sweep_bkt(
+        p_c=np.linspace(0.85, 0.94, 10),
+        sigma=np.linspace(0.2, 1.0, 10),
+        L_0=1.2,
+        delta=-0.25,
+        n_jobs=1,
+    )
+
+    assert abs(result['p_c'] - 0.892) < 0.05
+    assert abs(result['sigma'] - 0.5) < 0.3
+    plt.close('all')

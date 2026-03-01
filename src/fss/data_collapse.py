@@ -1363,6 +1363,287 @@ class DataCollapse:
 
         return result
 
+    def parameter_sweep_bkt(
+        self,
+        p_c: np.ndarray | list[float] | float,
+        sigma: np.ndarray | list[float] | float,
+        L_0: np.ndarray | list[float] | float,
+        delta: np.ndarray | list[float] | float = 0,
+        p_c_range: tuple[float, float] | None = None,
+        sigma_range: tuple[float, float] | None = None,
+        L_0_range: tuple[float, float] | None = None,
+        delta_range: tuple[float, float] | None = None,
+        ax: Axes | None = None,
+        colorbar_position: str = 'right',
+        n_jobs: int = -1,
+        backend: str = 'threading',
+        cmap: str = 'seismic',
+        log_chi2: bool = True,
+    ) -> dict[str, Any]:
+        """Sweep over two BKT parameters to visualize reduced chi-squared landscape.
+
+        Computes reduced chi-squared for a 2D grid of BKT parameter values, displays
+        a pcolormesh plot, and extracts optimal values with error bounds from
+        a contour at 1.3× the minimum chi-squared.
+
+        Note: This method only supports the basic BKT data collapse (without scaling
+        corrections). Use with BKT scaling only.
+
+        **Convention:** Each parameter (p_c, sigma, L_0, delta) can be:
+
+        - A list or array → swept over (used as grid axis)
+        - A scalar → held fixed at that value
+
+        Exactly 2 parameters must be arrays; the other 2 must be scalars.
+
+        Parameters
+        ----------
+        p_c : array-like or float
+            Critical point values. If array, swept over; if scalar, held fixed.
+        sigma : array-like or float
+            BKT exponent values. If array, swept; if scalar, fixed.
+        L_0 : array-like or float
+            BKT length scale values. If array, swept; if scalar, fixed.
+        delta : array-like or float, optional
+            Scaling exponent of y values. Default is 0 (scalar, fixed).
+        p_c_range : tuple[float, float] or None, optional
+            Bounds for p_c during internal fitting calls.
+        sigma_range : tuple[float, float] or None, optional
+            Bounds for sigma during internal fitting calls, by default (0.1, 5).
+        L_0_range : tuple[float, float] or None, optional
+            Bounds for L_0 during internal fitting calls.
+        delta_range : tuple[float, float] or None, optional
+            Bounds for delta during internal fitting calls, by default (-2, 2).
+        ax : Axes or None, optional
+            Matplotlib axes. If None, creates new figure.
+        colorbar_position : str, optional
+            Position of colorbar: 'right' or 'top', by default 'right'.
+        n_jobs : int, optional
+            Number of parallel jobs. Default -1 uses all CPU cores.
+            Set to 1 for serial execution (no parallelization).
+        backend : str, optional
+            Joblib backend: 'loky' (multiprocessing, default) or 'threading'.
+        cmap : str, optional
+            Colormap for pcolormesh, by default 'seismic'.
+        log_chi2 : bool, optional
+            If True, plot log(chi2), by default True.
+
+        Returns
+        -------
+        dict[str, Any]
+            Dictionary with keys:
+
+            - 'p_c', 'sigma', 'L_0', 'delta': optimal values at minimum chi-squared
+            - 'p_c_error', 'sigma_error', 'L_0_error', 'delta_error': (min, max) tuples from contour
+              (None for the fixed parameter)
+            - 'chi2_grid': the computed chi-squared array
+
+        Raises
+        ------
+        NotImplementedError
+            If not exactly 2 parameters are arrays.
+
+        Examples
+        --------
+        >>> # Sweep p_c and sigma, fix L_0 and delta
+        >>> result = dc.parameter_sweep_bkt(
+        ...     p_c=np.linspace(0.85, 0.95, 20),
+        ...     sigma=np.linspace(0.2, 1.0, 20),
+        ...     L_0=1.2,
+        ...     delta=-0.25,
+        ... )
+        """
+        import matplotlib.pyplot as plt
+
+        def is_iterable(x):
+            return isinstance(x, (list, np.ndarray))
+
+        # Classify parameters as sweep or fixed, preserving order
+        param_info = [
+            ('p_c', p_c, self.p_),
+            ('sigma', sigma, r'$\sigma$'),
+            ('L_0', L_0, r'$L_0$'),
+            ('delta', delta, r'$\Delta$'),
+        ]
+        sweep_params = []
+        fixed_params = {}
+        for name, val, label in param_info:
+            if is_iterable(val):
+                sweep_params.append((name, np.asarray(val), label))
+            else:
+                fixed_params[name] = val
+
+        if len(sweep_params) != 2:
+            raise NotImplementedError(
+                f"Exactly 2 parameter arrays required for pcolormesh, got {len(sweep_params)}. "
+                "got {len(sweep_params)}, need exactly 2 of the 4 BKT parameters (p_c, sigma, L_0, delta)."
+            )
+
+        # Extract sweep arrays (order preserved from signature)
+        name1, arr1, label1 = sweep_params[0]
+        name2, arr2, label2 = sweep_params[1]
+
+        # Auto-derive ranges from sweep arrays so lmfit doesn't clamp values
+        def _auto_range(val, default):
+            if isinstance(val, (list, np.ndarray)):
+                arr = np.asarray(val)
+                return (float(arr.min()), float(arr.max()))
+            return default
+
+        if p_c_range is None:
+            p_c_range = _auto_range(p_c, (0, 1))
+        if sigma_range is None:
+            sigma_range = _auto_range(sigma, (0.1, 5))
+        if L_0_range is None:
+            L_0_range = _auto_range(L_0, (0.01, float(np.min(self.L_i) - 1e-6)))
+        if delta_range is None:
+            delta_range = _auto_range(delta, (-2, 2))
+
+        # Define chi2 computation function
+        def compute_chi2(i, j):
+            params = dict(fixed_params)
+            params[name1] = arr1[i]
+            params[name2] = arr2[j]
+            try:
+                res = self.datacollapse_bkt(
+                    p_c=params['p_c'], sigma=params['sigma'], L_0=params['L_0'], delta=params['delta'],
+                    p_c_vary=False, sigma_vary=False, L_0_vary=False, delta_vary=False,
+                    p_c_range=p_c_range,
+                    sigma_range=sigma_range, L_0_range=L_0_range, delta_range=delta_range,
+                )
+                return i, j, res.redchi
+            except Exception:
+                return i, j, np.nan
+
+        # Generate all tasks
+        tasks = [(i, j) for i in range(len(arr1)) for j in range(len(arr2))]
+
+        # Execute
+        if n_jobs == 1:
+            results = [compute_chi2(i, j) for i, j in tasks]
+        else:
+            from joblib import Parallel, delayed
+            results = Parallel(n_jobs=n_jobs, backend=backend)(
+                delayed(compute_chi2)(i, j) for i, j in tasks
+            )
+
+        # Assemble grid
+        chi2_grid = np.zeros((len(arr1), len(arr2)))
+        for i, j, val in results:
+            chi2_grid[i, j] = val
+
+        def _trim_nan_edges(values: np.ndarray, grid: np.ndarray, axis: int) -> tuple[np.ndarray, np.ndarray]:
+            if axis == 0:
+                valid = ~np.all(np.isnan(grid), axis=1)
+            else:
+                valid = ~np.all(np.isnan(grid), axis=0)
+            if not np.any(valid):
+                return values, grid
+            start = int(np.argmax(valid))
+            end = int(len(valid) - np.argmax(valid[::-1]))
+            if axis == 0:
+                return values[start:end], grid[start:end, :]
+            return values[start:end], grid[:, start:end]
+
+        plot_arr1, plot_grid = _trim_nan_edges(arr1, chi2_grid, axis=0)
+        plot_arr2, plot_grid = _trim_nan_edges(arr2, plot_grid, axis=1)
+
+        # Create axes if needed
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(4, 4))
+
+        def _edges_from_centers(values: np.ndarray) -> np.ndarray:
+            if values.size == 1:
+                return np.array([values[0] - 0.5, values[0] + 0.5])
+            deltas = np.diff(values)
+            first = values[0] - deltas[0] / 2
+            last = values[-1] + deltas[-1] / 2
+            mids = values[:-1] + deltas / 2
+            return np.concatenate([[first], mids, [last]])
+
+        # Plot pcolormesh
+        im = ax.pcolormesh(
+            plot_arr2, plot_arr1, np.log(plot_grid) if log_chi2 else plot_grid,
+            cmap=cmap,
+            shading='auto',
+        )
+        ax.margins(x=0, y=0)
+        x_edges = _edges_from_centers(plot_arr2)
+        y_edges = _edges_from_centers(plot_arr1)
+        ax.set_xlim(x_edges[0], x_edges[-1])
+        ax.set_ylim(y_edges[0], y_edges[-1])
+
+        # Set axis labels (first sweep param → ylabel, second → xlabel)
+        ax.set_ylabel(_format_token(label1))
+        ax.set_xlabel(_format_token(label2))
+
+        # Add colorbar
+        cb_label = r'$\log(\chi_\nu^2)$' if log_chi2 else r'$\chi_\nu^2$'
+        if colorbar_position == 'right':
+            plt.colorbar(im, ax=ax, label=cb_label)
+        elif colorbar_position == 'top':
+            axins = ax.inset_axes([0.4, 1.02, 0.6, 0.05])
+            plt.colorbar(im, cax=axins, label='', orientation='horizontal')
+            axins.xaxis.tick_top()
+            axins.text(0.4, 1.02, cb_label, ha='right', va='bottom', transform=ax.transAxes)
+
+        # Find minimum and plot marker
+        idx1, idx2 = np.unravel_index(np.nanargmin(plot_grid), plot_grid.shape)
+        ax.plot(plot_arr2[idx2], plot_arr1[idx1], marker='x', color='red', markersize=10)
+
+        # Draw contour at 1.3× minimum
+        pts = ax.contour(
+            plot_arr2, plot_arr1, plot_grid,
+            levels=[1.3 * plot_grid[idx1, idx2]],
+            colors='y'
+        )
+
+        # Re-apply bounds to avoid autoscale margins after contour/marker
+        ax.margins(x=0, y=0)
+        ax.set_xlim(x_edges[0], x_edges[-1])
+        ax.set_ylim(y_edges[0], y_edges[-1])
+        ax.set_autoscale_on(False)
+
+        # Select contour with most vertices (longest)
+        paths = pts.get_paths()
+        if paths:
+            longest_path = max(paths, key=lambda p: len(p.vertices))
+            vertices = longest_path.vertices
+            error1 = (vertices[:, 1].min(), vertices[:, 1].max())
+            error2 = (vertices[:, 0].min(), vertices[:, 0].max())
+        else:
+            error1 = (np.nan, np.nan)
+            error2 = (np.nan, np.nan)
+
+        # Build result dict
+        result = {
+            'p_c': None,
+            'sigma': None,
+            'L_0': None,
+            'delta': None,
+            'p_c_error': None,
+            'sigma_error': None,
+            'L_0_error': None,
+            'delta_error': None,
+            'chi2_grid': chi2_grid,
+        }
+
+        # Set optimal values
+        result[name1] = plot_arr1[idx1]
+        result[name2] = plot_arr2[idx2]
+        for fname, fval in fixed_params.items():
+            result[fname] = fval
+
+        # Set errors for swept params
+        result[f'{name1}_error'] = error1
+        result[f'{name2}_error'] = error2
+
+        # Print summary
+        print(f'{name1}={arr1[idx1]:.4f}, {name2}={arr2[idx2]:.4f}, chi2={chi2_grid[idx1, idx2]:.4f}')
+        print(f'{name1} error=({error1[0]:.4f}, {error1[1]:.4f}), {name2} error=({error2[0]:.4f}, {error2[1]:.4f})')
+
+        return result
+
 
 def grid_search(
     n1_list: list[int],
