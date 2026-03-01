@@ -1311,6 +1311,7 @@ class DataCollapse:
         # Find minimum and plot marker
         idx1, idx2 = np.unravel_index(np.nanargmin(plot_grid), plot_grid.shape)
         ax.plot(plot_arr2[idx2], plot_arr1[idx1], marker='x', color='red', markersize=10)
+        ax.set_title(f'min $\\chi^2_\\nu$ = {plot_grid[idx1, idx2]:.1f}')
 
         # Draw contour at 1.3× minimum
         pts = ax.contour(
@@ -1590,6 +1591,7 @@ class DataCollapse:
         # Find minimum and plot marker
         idx1, idx2 = np.unravel_index(np.nanargmin(plot_grid), plot_grid.shape)
         ax.plot(plot_arr2[idx2], plot_arr1[idx1], marker='x', color='red', markersize=10)
+        ax.set_title(f'min $\\chi^2_\\nu$ = {plot_grid[idx1, idx2]:.1f}')
 
         # Draw contour at 1.3× minimum
         pts = ax.contour(
