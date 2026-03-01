@@ -103,7 +103,7 @@ class DataCollapse:
         """
         self.p_range=p_range
         self.Lmin=0 if Lmin is None else Lmin
-        self.Lmax=1000 if Lmax is None else Lmax
+        self.Lmax=np.inf if Lmax is None else Lmax
         self.params=params
         self.p_=p_
         self.L_=L_
