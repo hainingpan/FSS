@@ -467,6 +467,12 @@ git clone https://github.com/hainingpan/FSS.git
 cd FSS
 pip install -e ".[dev]"
 ```
+Or with `uv`:
+```bash
+git clone https://github.com/hainingpan/FSS.git
+cd FSS
+uv sync
+```
 
 ### Running Tests
 

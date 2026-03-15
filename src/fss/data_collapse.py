@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable, Iterator, Any
 import re
+import warnings
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -196,7 +197,8 @@ class DataCollapse:
             y_i=(self.df['estimator'].values)
         else:
             raise NotImplementedError(f'estimator {self.estimator} not implemented')
-        assert np.unique(p_i).shape[0]>=4, f'not enough data points {np.unique(p_i).shape[0]}'
+        if np.unique(p_i).shape[0]<4:
+            warnings.warn(f'not enough data points {np.unique(p_i).shape[0]}', stacklevel=2)
         return L_i,p_i,d_i,y_i   
 
     
