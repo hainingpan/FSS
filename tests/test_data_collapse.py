@@ -352,3 +352,46 @@ def test_parameter_sweep_bkt():
     assert abs(result['p_c'] - 0.892) < 0.05
     assert abs(result['sigma'] - 0.5) < 0.3
     plt.close('all')
+
+
+def test_loss_finite_at_tied_p_c():
+    """Regression test: loss() must not crash or return NaN when p_c equals a sample p value."""
+    rng = np.random.default_rng(42)
+    p_list = np.round(np.linspace(0.45, 0.55, 11), 2)  # contains 0.50 exactly
+    L_list = [10, 12, 14, 16, 18]
+    data = {(p, L): L**(-0.5) * (1 - (p - 0.5) * L)**0.5 + rng.normal(0, 0.01, 100)
+            for L in L_list for p in p_list}
+    idx = pd.MultiIndex.from_tuples(list(data.keys()), names=['p', 'L'])
+    df = pd.DataFrame({'observations': list(data.values())}, index=idx)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.45, 0.55])
+    # p_c=0.50 is EXACTLY on the grid → 5 tied x=0 values → previously crashed
+    r = dc.loss(p_c=0.50, nu=1.0, beta=0.0)
+    assert np.all(np.isfinite(r)), f"non-finite residuals: {r}"
+    assert r.shape[0] > 0
+    # Determinism: same call twice must give identical results
+    r2 = dc.loss(p_c=0.50, nu=1.0, beta=0.0)
+    assert np.array_equal(r, r2), "loss() is not deterministic"
+    # Convergence: fit starting at tied p_c must converge
+    res = dc.datacollapse(p_c=0.50, nu=1.0, beta=0.0, p_c_vary=True, nu_vary=True, beta_vary=False)
+    assert abs(res.params['p_c'].value - 0.5) < 0.05
+
+
+def test_loss_bkt_finite_at_tied_p_c():
+    """Regression test: loss_bkt() must not crash or return NaN when p_c equals a sample p value."""
+    rng = np.random.default_rng(42)
+    p_vals = np.round(np.linspace(0.8, 0.98, 10), 3)  # pick p_vals[4] as the tied p_c
+    L_vals = np.array([16, 32, 64, 128])
+    p_c_tied = p_vals[4]  # exact sample value
+    data = {}
+    for L in L_vals:
+        for p in p_vals:
+            x = (p - 0.892) * (np.log(L / 1.2))**(1/0.5)
+            f_x = 1.0 / (1.0 + np.exp(2.0 * x))
+            data[(p, L)] = rng.normal(f_x, 0.01, 100)
+    idx = pd.MultiIndex.from_tuples(list(data.keys()), names=['p', 'L'])
+    df = pd.DataFrame({'observations': list(data.values())}, index=idx)
+    dc = DataCollapse(df, p_='p', L_='L', params={}, p_range=[0.75, 1.0])
+    # p_c_tied is EXACTLY on the grid → tied x values → previously crashed
+    r = dc.loss_bkt(p_c=p_c_tied, L_0=1.2, sigma=0.5, delta=0.0)
+    assert np.all(np.isfinite(r)), f"non-finite BKT residuals: {r}"
+    assert r.shape[0] > 0

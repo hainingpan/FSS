@@ -11,6 +11,7 @@ Minimal, lmfit‑backed wrapper for estimating critical parameters via finite‑
   - [Finding good initial values](#finding-good-initial-values)
 - [Theory (finite‑size scaling)](#theory-finite-size-scaling)
   - [BKT-like transition](#bkt-like-transition)
+  - [Loss function (reduced χ²)](#loss-function-reduced-χ²)
 - [Scaling corrections for drifting crossings](#scaling-corrections-for-drifting-crossings)
   - [Model selection](#model-selection)
   - [Usage](#usage)
@@ -202,6 +203,28 @@ $$
 and optimizes $p_c, \sigma, L_0, \Delta$ so that $y_{\text{scaled}}$ falls on a single curve $f(x)$.
 
 A key diagnostic: if one attempts a conventional power-law collapse on BKT data, the best-fit $\chi^2$ will be orders of magnitude worse than the BKT collapse, signaling that the transition is not power-law type.
+
+### Loss function (reduced χ²)
+
+Collapse quality is measured by how smoothly the rescaled data fall on a single curve. For each interior point $i$ (sorted by $x$), the expected value $\bar{y}_i$ is the linear interpolation from its two neighbors:
+
+$$
+\bar{y}_i = \frac{(x_{i+1}-x_i)\,y_{i-1} + (x_i-x_{i-1})\,y_{i+1}}{x_{i+1}-x_{i-1}}
+$$
+
+with propagated variance
+
+$$
+\bar{\sigma}_i^2 = d_i^2 + \left(\frac{x_{i+1}-x_i}{x_{i+1}-x_{i-1}}\,d_{i-1}\right)^2 + \left(\frac{x_i-x_{i-1}}{x_{i+1}-x_{i-1}}\,d_{i+1}\right)^2
+$$
+
+where $d_i$ is the standard error of $y_i$. The objective is
+
+$$
+\chi^2 = \sum_i \frac{(y_i - \bar{y}_i)^2}{\bar{\sigma}_i^2}, \qquad \chi^2_\nu = \frac{\chi^2}{N_\mathrm{dof}}
+$$
+
+$\chi^2_\nu \approx 1$ indicates the data collapse within error bars; $\chi^2_\nu \gg 1$ signals a poor collapse (wrong parameters or wrong scaling ansatz). This loss is used for both power-law and BKT collapse — only the definition of $x$ changes. Drift-corrected fits use a polynomial GLS $\chi^2$ instead.
 
 ## Scaling corrections for drifting crossings
 
@@ -503,7 +526,7 @@ If you use this package in your research, please cite:
   publisher    = {GitHub},
   journal      = {GitHub repository},
   url          = {https://github.com/hainingpan/FSS},
-  version      = {0.0.6}
+  version      = {0.0.7}
 }
 ```
 

@@ -207,6 +207,20 @@ class DataCollapse:
         x_i=x_i[ind]
         y_scaled=y_scaled[ind]
         d_scaled=d_scaled[ind]
+        # De-tie: when ≥2 consecutive sorted x values are identical, the interpolation
+        # denominator x[1]-x[-1] vanishes (removable singularity). Spread tied entries
+        # by a deterministic tiny offset to recover the finite limit of the residual.
+        gaps = np.diff(x_i)
+        tol = max(1e-8 * (x_i[-1] - x_i[0]), 1e-15)
+        if np.any(gaps < tol):
+            # Cumulative count of ties: each tied run gets offsets 0, eps, 2*eps, ...
+            tie_mask = np.concatenate(([False], gaps < tol))
+            offsets = np.where(tie_mask, tol * 0.1, 0.0)
+            # Make offsets cumulative within each tied group
+            for k in range(1, len(offsets)):
+                if tie_mask[k]:
+                    offsets[k] += offsets[k - 1]
+            x_i = x_i + offsets
         x={i:x_i[1+i:x_i.shape[0]-1+i] for i in [-1,0,1]}
         d={i:d_scaled[1+i:d_scaled.shape[0]-1+i] for i in [-1,0,1]}
         y={i:y_scaled[1+i:y_scaled.shape[0]-1+i] for i in [-1,0,1]}
